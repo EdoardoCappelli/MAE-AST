@@ -46,7 +46,7 @@ class PatchEmbedding(nn.Module):
         original_patch_embeddings = patch_embeddings
 
         # [B, num_patches, patch_embedding_dim] -> [B, num_patches, enc_embed_dim]
-        patch_embeddings = nn.Linear(self.patch_size[0] * self.patch_size[1], self.enc_embed_dim)(patch_embeddings) # applichiamo una linear layer per convertire in embedding
+        patch_embeddings = self.linear(patch_embeddings) 
         # print(f"Patch embeddings shape after linear layer: {patch_embeddings.shape}")
         
         patch_embeddings = self.dropout(patch_embeddings)

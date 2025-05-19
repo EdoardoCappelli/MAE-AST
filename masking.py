@@ -11,7 +11,7 @@ class Mask(nn.Module):
         self.masking_strategy = config.masking_strategy
         self.encoder_mask_emb = nn.Parameter(torch.FloatTensor(config.enc_embed_dim).uniform_()) # è l'embedding che rappresenta la patch mascherata e dovrebbe essere appresa durante il training
 
-    def forward(self, patch_embeddings) -> torch.Tensor:
+    def forward(self, patch_embeddings: torch.Tensor) -> torch.Tensor:
         B, num_patches, patch_embedding_dim = patch_embeddings.shape
         original_patch_embedding = patch_embeddings.detach().clone()
         total_patches_to_mask = int(self.masking_percentage * num_patches)
@@ -19,13 +19,13 @@ class Mask(nn.Module):
 
         # masked_indices = []num
         # unmasked_indices = []
-        masked_indices = torch.zeros((B, total_patches_to_mask), dtype=torch.long)
-        unmasked_indices = torch.zeros((B, total_patches_to_not_mask), dtype=torch.long)
-        masked_patch_embeddings = torch.zeros((B, num_patches, patch_embedding_dim), dtype=torch.long)
+        masked_indices = torch.zeros((B, total_patches_to_mask), dtype=torch.long, device=patch_embeddings.device)
+        unmasked_indices = torch.zeros((B, total_patches_to_not_mask), dtype=torch.long, device=patch_embeddings.device)
+        masked_patch_embeddings = torch.zeros((B, num_patches, patch_embedding_dim), dtype=torch.long, device=patch_embeddings.device)
 
         if self.masking_strategy == "random":
             for b in range(B):
-                random_indices = torch.randperm(num_patches)
+                random_indices = torch.randperm(num_patches, device=patch_embeddings.device)
                 
                 masked_indices_i = random_indices[:total_patches_to_mask]
                 unmasked_indices_i = random_indices[total_patches_to_mask:]
