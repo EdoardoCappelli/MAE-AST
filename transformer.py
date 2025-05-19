@@ -4,7 +4,9 @@ from config import Config
 from patch_extractor import PatchEmbedding
 from process_wav import convert_wav_to_mel_spectrogram, visualize_spectrogram
 import numpy as np
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
+from masking import Mask
+from positional_encoding import SinusoidalPositionalEncoding
 
 # Encoder del Vision Transformer
 class MAE_Attention(nn.Module):
@@ -73,16 +75,15 @@ class MAE_Encoder(nn.Module):
 
     def forward(
         self,
-        inputs_embeds: torch.Tensor
+        not_masked_patches: torch.Tensor # indici delle patch non mascherate
     ) -> torch.Tensor:
-        # inputs_embeds: [Batch_Size, Num_Patches, Embed_Dim]
-        hidden_states = inputs_embeds
+        # not_masked_patches: [Batch_Size, Num_Patches, Embed_Dim]
 
         for encoder_layer in self.layers:
             # [Batch_Size, Num_Patches, Embed_Dim] -> [Batch_Size, Num_Patches, Embed_Dim]
-            hidden_states = encoder_layer(hidden_states)
+            not_masked_patches_encoded = encoder_layer(not_masked_patches)
 
-        return hidden_states
+        return not_masked_patches_encoded
 
 class MAE_MLP(nn.Module):
     def __init__(self, config: Config):
@@ -110,24 +111,25 @@ class MAE_EncoderLayer(nn.Module):
         self.layer_norm2 = nn.LayerNorm(self.embed_dim, eps=config.enc_layer_norm_eps)
 
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def forward(self, not_masked_patches: torch.Tensor) -> torch.Tensor:
         # [B, num_patches, embed_dim] -> [B, num_patches, embed_dim]
-        residual = hidden_states
+        residual = not_masked_patches
         # layer norm 1 - [B, num_patches, embed_dim] -> [B, num_patches, embed_dim]
-        hidden_states = self.layer_norm1(hidden_states)
+        not_masked_patches = self.layer_norm1(not_masked_patches)
         # multi head attention - [B, num_patches, embed_dim] -> [B, num_patches, embed_dim]
-        hidden_states, _ = self.self_attn(hidden_states)
+        not_masked_patches_after_attn, _ = self.self_attn(not_masked_patches)
         # residual connection - [B, num_patches, embed_dim] -> [B, num_patches, embed_dim]
-        hidden_states = hidden_states + residual
-        residual = hidden_states
+        not_masked_patches_after_attn = not_masked_patches_after_attn + residual
+        residual = not_masked_patches_after_attn
         # layer norm 2 - [B, num_patches, embed_dim] -> [B, num_patches, embed_dim]
-        hidden_states = self.layer_norm2(hidden_states)
+        not_masked_patches_after_attn = self.layer_norm2(not_masked_patches_after_attn)
         # feed forward network - [B, num_patches, embed_dim] -> [B, num_patches, embed_dim]
-        hidden_states = self.mlp(hidden_states)
+        not_masked_patches_after_mlp = self.mlp(not_masked_patches_after_attn)
         # residual connection  
-        hidden_states = hidden_states + residual
+        not_masked_patches_after_mlp = not_masked_patches_after_mlp + residual
 
-        return hidden_states 
+        return not_masked_patches_after_mlp 
+
     
 class VisionTransformer(nn.Module):
     def __init__(self, config: Config):
@@ -137,52 +139,132 @@ class VisionTransformer(nn.Module):
         self.dec_embed_dim = config.dec_embed_dim
 
         # [B, num_patches, embed_dim]
-        self.embeddings = PatchEmbedding(config) # patches estratte da ogni spettrogramma e convertite in embedding  
-        
-        # maskind del 75% delle patches
-
+        self.patch_embeddings = PatchEmbedding(config) # patches estratte da ogni spettrogramma e convertite in embedding  
+        self.position_embedding_before_encoder = SinusoidalPositionalEncoding(embed_dim=self.enc_embed_dim)
         self.encoder = MAE_Encoder(config) # sara una lista di TransformerLayer 
         self.post_enc_layernorm = nn.LayerNorm(config.enc_embed_dim, eps=config.enc_layer_norm_eps)
         self.linear = nn.Linear(self.enc_embed_dim, self.dec_embed_dim)
         
-        # self.decoder = MAE_Encoder(config, decoder=True)
-
+        self.decoder_mask_emb = nn.Parameter(torch.FloatTensor(config.dec_embed_dim).uniform_()) # è l'embedding che rappresenta la patch mascherata e dovrebbe essere appresa durante il training
+        self.position_embedding_before_decoder = SinusoidalPositionalEncoding(embed_dim=self.dec_embed_dim)
+        self.decoder = MAE_Encoder(config, decoder=True)
+        
+        self.final_proj_reconstruction = nn.Linear(
+            config.dec_embed_dim,
+            config.patch_size[0] * config.patch_size[1]
+        )
+        self.final_proj_classification = nn.Linear(
+            config.dec_embed_dim,
+            config.patch_size[0] * config.patch_size[1]
+        )
     
     def forward(self, spectrogram_values:torch.Tensor) -> torch.Tensor:
-            
-        patch_embeddings = self.embeddings(spectrogram_values) # estraggo patches e converto in embedding (con positional embedding)
+        B = spectrogram_values.shape[0]
+        # print("spectrogram_values: ", spectrogram_values.shape)
+
+        # [B, C, H, W] -> [B, num_patches, patch_embed_dim] 
+        original_patch_embeddings, masked_patch_embeddings, masked_indices, unmasked_indices, num_masked_patches = self.patch_embeddings(spectrogram_values) # estraggo patches e converto in embedding (con positional embedding)
+        masked_patch_embeddings_with_position = masked_patch_embeddings + self.position_embedding_before_encoder(masked_patch_embeddings)
+        # not_masked_patches = original_patch_embeddings[:, unmasked_indices[0], :] 
         
-        # masking delle patches
+        not_masked_patches = []
+        for b in range(B):
+            visible_b = masked_patch_embeddings[b, unmasked_indices[b], :].float()
+            not_masked_patches.append(visible_b)
+
+        not_masked_patches = torch.stack(not_masked_patches, dim=0)  # [B, N-M, enc_embed_dim]
         
-        encoder_output = self.encoder(inputs_embeds = patch_embeddings)
+        encoder_output = self.encoder(not_masked_patches)
         encoder_output = self.post_enc_layernorm(encoder_output)
 
         if self.enc_embed_dim != self.dec_embed_dim:
             encoder_output = self.linear(encoder_output) # [B, num_patches, enc_embed_dim] -> [B, num_patches, dec_embed_dim]
-        # decoder_output = self.decoder(inputs_embeds = encoder_output)
 
-        print(f"Input shape: {spectrogram_values.shape}") # [B, C, H, W]
-        print(f"Patch embedding shape: {patch_embeddings.shape}") # [B, num_patches, embed_dim]
+        # Add masked patches to encoder output
+        N_patches = masked_patch_embeddings_with_position.size(1)
+        patch_embeddings_recostructed = torch.zeros(
+            (B, N_patches, self.dec_embed_dim), 
+            device=encoder_output.device, 
+            dtype=encoder_output.dtype)
+        
+        mask_indices_bool = torch.zeros(
+            (B, N_patches), 
+            device=encoder_output.device, 
+            dtype=torch.bool
+        )
 
-        return encoder_output
+        for b in range(B):
+            # encoder output shape: [B, patch_non_nascherate, patch_dim]
+            patch_embeddings_recostructed[b, unmasked_indices[b], :] = encoder_output[b]
+            
+            # patch_embeddings_recostructed[b, masked_indices[b]] = self.decoder_mask_emb
+            mask_tokens = self.decoder_mask_emb.unsqueeze(0).expand(num_masked_patches, -1)
+            patch_embeddings_recostructed[b, masked_indices[b], :] = mask_tokens
+            
+            # c) segno in mask_indices_bool quali posizioni sono mascherate
+            mask_indices_bool[b, masked_indices[b]] = True
+
+        patch_embeddings_recostructed_with_position = patch_embeddings_recostructed + self.position_embedding_before_decoder(patch_embeddings_recostructed)
+        
+        decoder_output = self.decoder(patch_embeddings_recostructed_with_position) 
+        # print("Decoder output shape:", decoder_output.shape) 
+        
+        # recupero patch che avevo mascherato
+        batch_idx = torch.arange(B, device=decoder_output.device).unsqueeze(-1)  # → [B, 1]
+        masked_patches_after_decoder = decoder_output[batch_idx, masked_indices, :]  
+        # print("masked_patches_after_decoder shape: ", masked_patches_after_decoder.shape)
+        recostruction_logits = self.final_proj_reconstruction(masked_patches_after_decoder) # [B, N_masked, patch_size^2]
+        classification_logits = self.final_proj_classification(masked_patches_after_decoder) # [B, N_masked, patch_size^2]
+
+        patch_dim = original_patch_embeddings.size(-1) 
+        # print(f"patch_dim: {patch_dim}")
+
+        target_patches = torch.zeros(
+            (B, num_masked_patches, patch_dim),
+            device=original_patch_embeddings.device,
+            dtype=original_patch_embeddings.dtype
+        )
+        
+        for b in range(B):
+            target_patches[b] = original_patch_embeddings[b, masked_indices[b], :]
+
+        return {
+            "encoder_output": encoder_output,
+            "decoder_output": decoder_output,
+            "recon_logits": recostruction_logits,
+            "class_logits": classification_logits,
+            "target_patches": target_patches
+        }
     
 def test_model():
     config = Config()
     model = VisionTransformer(config)
     print(model)
-    print(model.embeddings)
-    print(model.encoder)
-    print(model.post_enc_layernorm)
+    # print(model.patch_embeddings)
+    # print(model.encoder)
+    # print(model.post_enc_layernorm)
 
-    spectrogram_np = np.load("C:/Users/admin/Desktop/VS Code/VisualTransformer/datasets/numpy/balanced_train_segments/EX_-_6RxZyi30Q.npy")
-    spectrogram = torch.from_numpy(spectrogram_np)
+    # spectrogram_np = np.load("C:/Users/admin/Desktop/VS Code/VisualTransformer/datasets/numpy/balanced_train_segments/EX_-_6RxZyi30Q.npy")
+    # spectrogram = torch.from_numpy(spectrogram_np)
+    spectrogram_np = np.arange(0, 1000*128).reshape(1000, 128)
+    spectrogram = torch.tensor(spectrogram_np, dtype=torch.float32)
     spectrogram = spectrogram.unsqueeze(0).unsqueeze(0) # [B, C, W, H]
     spectrogram = spectrogram.permute(0, 1, 3, 2) # [B, C, H, W]
 
     # visualize_spectrogram(spectrogram, "C:/Users/admin/Desktop/VS Code/VisualTransformer/plots")
-    out = model(spectrogram)
-    print(out.shape)
-
+    output = model(spectrogram)
+    encoder_output = output["encoder_output"]
+    decoder_output = output["decoder_output"]
+    recon_logits = output["recon_logits"]
+    class_logits = output["class_logits"]
+    target_patches = output["target_patches"]
+    
+    # print("Encoder output shape:", encoder_output.shape)
+    # print("Decoder output shape:", decoder_output.shape)
+    # print("Reconstruction logits shape:", recon_logits.shape)
+    # print("Classification logits shape:", class_logits.shape)
+    # print("Target patches shape:", target_patches.shape)
+    # print("Spectrogram shape:", spectrogram.shape)
 
 if __name__ == "__main__":
     test_model()

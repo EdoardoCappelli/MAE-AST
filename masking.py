@@ -3,34 +3,52 @@ import torch.nn as nn
 from config import Config
 
 
-class MaskingGenerator(nn.Module):
+class Mask(nn.Module):
     def __init__(self, config: Config):
         super().__init__()
         self.config = config
-        self.mask_ratio = config.mask_ratio
-        self.mask_length = config.mask_length
-        self.num_patches = config.num_patches
+        self.masking_percentage = config.masking_percentage
         self.masking_strategy = config.masking_strategy
-        self.perc_masked_tokens = config.perc_masked_tokens
+        self.encoder_mask_emb = nn.Parameter(torch.FloatTensor(config.enc_embed_dim).uniform_()) # è l'embedding che rappresenta la patch mascherata e dovrebbe essere appresa durante il training
 
-    def forward(self, spectrogram_values) -> torch.Tensor:
-        B, T, C = spectrogram_values.shape
+    def forward(self, patch_embeddings) -> torch.Tensor:
+        B, num_patches, patch_embedding_dim = patch_embeddings.shape
+        original_patch_embedding = patch_embeddings.detach().clone()
+        total_patches_to_mask = int(self.masking_percentage * num_patches)
+        total_patches_to_not_mask = num_patches - total_patches_to_mask
 
-        masked_indices = []
-        unmasked_indices = []
+        # masked_indices = []num
+        # unmasked_indices = []
+        masked_indices = torch.zeros((B, total_patches_to_mask), dtype=torch.long)
+        unmasked_indices = torch.zeros((B, total_patches_to_not_mask), dtype=torch.long)
+        masked_patch_embeddings = torch.zeros((B, num_patches, patch_embedding_dim), dtype=torch.long)
 
         if self.masking_strategy == "random":
-            for i in range(B):
-                random_indices = list(range(T))
-                random_indices = torch.randperm(T).tolist()
-                unmasked_indices = random_indices[:int((1-self.mask_ratio) * T)]
+            for b in range(B):
+                random_indices = torch.randperm(num_patches)
+                
+                masked_indices_i = random_indices[:total_patches_to_mask]
+                unmasked_indices_i = random_indices[total_patches_to_mask:]
+                
+                masked_indices[b, :] = masked_indices_i
+                unmasked_indices[b, :] = unmasked_indices_i
+                
+                patch_embeddings[b, masked_indices_i, :] = self.encoder_mask_emb # Mask the patches
+                masked_patch_embeddings[b] = patch_embeddings[b]
 
-        
+                # print("Masked indices i:", masked_indices_i)
+                # print("Unmasked indices i:", unmasked_indices_i)
+                # print("Masked patch embeddings i:", masked_patch_embeddings[b])
+                # print("Unmasked patch embeddings i:", patch_embeddings[b, unmasked_indices_i])
+                # print("Masked patch embeddings shape i:", masked_patch_embeddings[b].shape)
+                # print("Unmasked patch embeddings shape:", patch_embeddings[b, unmasked_indices_i].shape)
+            
         elif self.masking_strategy == "chunk":
             pass
 
         else:
             raise ValueError("Invalid masking strategy")
         
-        return masked_indices, unmasked_indices
+        num_masked_patches = len(masked_indices[0])
+        return original_patch_embedding, masked_patch_embeddings, masked_indices, unmasked_indices, num_masked_patches
         
