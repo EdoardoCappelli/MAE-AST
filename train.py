@@ -72,7 +72,7 @@ def train_one_epoch(model: VisionTransformer,
     curr_lr = optimizer.param_groups[0]['lr']
 
     print(
-        f"Fine Epoch:\n"
+        f"  Fine Epoch:\n"
         f"\tAvg Loss Tot:\t{avg_loss:.4f}\n"
         f"\tAvg Recon:\t{avg_recon_loss:.4f}\n"
         f"\tAvg InfoNCE:\t{avg_NCE_loss:.4f}\n"

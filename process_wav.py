@@ -1,10 +1,8 @@
 import torch
 import torch.nn.functional as F
-from config import Config as config
 import matplotlib.pyplot as plt
 import argparse
 import soundfile as sf
-import av
 import os 
 import numpy as np
 
@@ -99,7 +97,7 @@ def visualize_spectrogram(spectrogram, output_path=None):
         print(f"Saved visualization to {output_path}")
     
     plt.show()
-
+    
 def main():
     parser = argparse.ArgumentParser(description='Convert .wav to mel spectrogram')
     parser.add_argument('--wav_dir', type=str, help='Path to the directory containing .wav files')
