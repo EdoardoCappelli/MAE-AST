@@ -51,7 +51,7 @@ def main():
     parser.add_argument('--out_dir', type=str, help='Path to save the tensors')
     args = parser.parse_args()
 
-    convert_npy_to_tensors(npy_dir, out_dir)
+    convert_npy_to_tensors(args.npy_dir, args.out_dir)
 
 if __name__ == '__main__':
     main()
