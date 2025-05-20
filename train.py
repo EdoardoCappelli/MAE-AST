@@ -110,13 +110,13 @@ def train_one_epoch(model: VisionTransformer,
         total_recon_loss_epoch += loss_recon.item()
         total_NCE_loss_epoch += loss_info_nce.item()
 
-        # if batch_idx % 5 == 0:
-        #     print(
-        #         f"  Batch {batch_idx}/{len(dataloader)}:\n "
-        #         f"\tLoss Tot:\t{combined_loss.item():.4f}\n"
-        #         f"\tLoss Recon:\t{loss_recon.item():.4f} (x{config.lambda_recon:.2f})\n"
-        #         f"\tInfoNCE Loss:\t{loss_info_nce.item():.4f} (x{1:.2f})\n\n"
-        #     )
+        if batch_idx % 5 == 0:
+            print(
+                f"  Batch {batch_idx}/{len(dataloader)}:\n "
+                f"\tLoss Tot:\t{combined_loss.item():.4f}, "
+                f"Loss Recon:\t{loss_recon.item():.4f} (x{config.lambda_recon:.2f}), "
+                f"InfoNCE Loss:\t{loss_info_nce.item():.4f} (x{1:.2f})\n"
+            )
 
     # Calcolo delle medie sull’intero epoch
     avg_loss = total_loss_epoch / len(dataloader)
@@ -151,7 +151,7 @@ def main():
         default=None,
         help="Numero di campioni da utilizzare (intero). Se non specificato, viene usato l'intero dataset."
     )
-    
+
     args = parser.parse_args()
     dataset_dir = args.dataset_dir
     sample_size = args.sample_size
@@ -203,7 +203,7 @@ def main():
     # dummy_dataset = torch.utils.data.TensorDataset(torch.stack(dummy_data))
     # dataloader = torch.utils.data.DataLoader(dummy_dataset, batch_size=config.batch_size)
 
-    print("Inizio Training Fittizio...")
+    print("Inizio Training...")
     for epoch in range(1, config.epochs + 1):
         print(f"--- Epoch {epoch} ---")
         avg_epoch_loss = train_one_epoch(
