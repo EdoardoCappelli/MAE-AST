@@ -145,8 +145,14 @@ def main():
         nargs='?',
         default="/content/drive/MyDrive/Università/DeepLearning/mae_audio/datasets/tensors/balanced_train_segments",
     )
+    parser.add_argument(
+        'sample_size',
+        nargs='?',
+        default=None,
+    )
     args = parser.parse_args()
     dataset_dir = args.dataset_dir
+    sample_size = args.sample_size
 
     config = Config()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -169,12 +175,12 @@ def main():
     
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=polynomial_decay)
 
-    dataset = BalancedTrainDataset(dataset_dir)
+    dataset = BalancedTrainDataset(dataset_dir, sample_size=sample_size)
     
     # Creazione del DataLoader
     dataloader = DataLoader(
         dataset, 
-        batch_size=32, 
+        batch_size=128, 
         shuffle=True,  # Shuffle per training self-supervised
         num_workers=4, 
         pin_memory=True
