@@ -118,7 +118,7 @@ if __name__ == "__main__":
     dummy_data = []
     for _ in range(20): # 20 campioni fittizi
         # Calcola altezza e larghezza valide per essere divisibili per patch_size
-        img_width = 900
+        img_width = 896
         img_height = 128
         valid_h = (img_height // config.patch_size[0]) * config.patch_size[0]
         valid_w = (img_width // config.patch_size[1]) * config.patch_size[1]

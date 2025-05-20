@@ -34,7 +34,7 @@ class Config:
             batch_size = 32,
             learning_rate = 0.01,
             lambda_recon = 10,
-            epochs = 10,
+            epochs = 30,
             
             **kwargs
     ):
