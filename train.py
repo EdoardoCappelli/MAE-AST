@@ -24,7 +24,7 @@ class BalancedTrainDataset(Dataset):
                 self._load_files(Path(dir_path))
         else:
             self._load_files(Path(data_dir))
-        
+        print(sample_size)
         if sample_size is not None and sample_size < len(self.file_paths):
             self.file_paths = random.sample(self.file_paths, sample_size)
         
