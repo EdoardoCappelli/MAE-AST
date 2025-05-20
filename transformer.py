@@ -140,6 +140,7 @@ class VisionTransformer(nn.Module):
 
         # [B, num_patches, embed_dim]
         self.patch_embeddings = PatchEmbedding(config) # patches estratte da ogni spettrogramma e convertite in embedding  
+        self.mask = Mask(config) 
         self.position_embedding_before_encoder = SinusoidalPositionalEncoding(embed_dim=self.enc_embed_dim)
         self.encoder = MAE_Encoder(config) # sara una lista di TransformerLayer 
         self.post_enc_layernorm = nn.LayerNorm(config.enc_embed_dim, eps=config.enc_layer_norm_eps)
@@ -163,9 +164,9 @@ class VisionTransformer(nn.Module):
         # print("spectrogram_values: ", spectrogram_values.shape)
 
         # [B, C, H, W] -> [B, num_patches, patch_embed_dim] 
-        original_patch_embeddings, masked_patch_embeddings, masked_indices, unmasked_indices, num_masked_patches = self.patch_embeddings(spectrogram_values) # estraggo patches e converto in embedding (con positional embedding)
+        patch_embeddings =  self.patch_embeddings(spectrogram_values) # estraggo patches e converto in embedding (con positional embedding)
+        masked_patch_embeddings, masked_indices, unmasked_indices = self.mask(patch_embeddings) 
         masked_patch_embeddings_with_position = masked_patch_embeddings + self.position_embedding_before_encoder(masked_patch_embeddings)
-        # not_masked_patches = original_patch_embeddings[:, unmasked_indices[0], :] 
         
         not_masked_patches = []
         for b in range(B):
@@ -198,7 +199,7 @@ class VisionTransformer(nn.Module):
             patch_embeddings_recostructed[b, unmasked_indices[b], :] = encoder_output[b]
             
             # patch_embeddings_recostructed[b, masked_indices[b]] = self.decoder_mask_emb
-            mask_tokens = self.decoder_mask_emb.unsqueeze(0).expand(num_masked_patches, -1)
+            mask_tokens = self.decoder_mask_emb.unsqueeze(0).expand(len(masked_indices[0]), -1)
             patch_embeddings_recostructed[b, masked_indices[b], :] = mask_tokens
             
             # c) segno in mask_indices_bool quali posizioni sono mascherate
@@ -216,17 +217,17 @@ class VisionTransformer(nn.Module):
         recostruction_logits = self.final_proj_reconstruction(masked_patches_after_decoder) # [B, N_masked, patch_size^2]
         classification_logits = self.final_proj_classification(masked_patches_after_decoder) # [B, N_masked, patch_size^2]
 
-        patch_dim = original_patch_embeddings.size(-1) 
+        patch_dim = patch_embeddings.size(-1) 
         # print(f"patch_dim: {patch_dim}")
 
         target_patches = torch.zeros(
-            (B, num_masked_patches, patch_dim),
-            device=original_patch_embeddings.device,
-            dtype=original_patch_embeddings.dtype
+            (B, len(masked_indices[0]), patch_dim),
+            device=patch_embeddings.device,
+            dtype=patch_embeddings.dtype
         )
         
         for b in range(B):
-            target_patches[b] = original_patch_embeddings[b, masked_indices[b], :]
+            target_patches[b] = patch_embeddings[b, masked_indices[b], :]
 
         return {
             "encoder_output": encoder_output,

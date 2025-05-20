@@ -17,8 +17,6 @@ class Mask(nn.Module):
         total_patches_to_mask = int(self.masking_percentage * num_patches)
         total_patches_to_not_mask = num_patches - total_patches_to_mask
 
-        # masked_indices = []num
-        # unmasked_indices = []
         masked_indices = torch.zeros((B, total_patches_to_mask), dtype=torch.long, device=patch_embeddings.device)
         unmasked_indices = torch.zeros((B, total_patches_to_not_mask), dtype=torch.long, device=patch_embeddings.device)
         masked_patch_embeddings = torch.zeros((B, num_patches, patch_embedding_dim), dtype=torch.long, device=patch_embeddings.device)
@@ -49,6 +47,5 @@ class Mask(nn.Module):
         else:
             raise ValueError("Invalid masking strategy")
         
-        num_masked_patches = len(masked_indices[0])
-        return original_patch_embedding, masked_patch_embeddings, masked_indices, unmasked_indices, num_masked_patches
+        return masked_patch_embeddings, masked_indices, unmasked_indices
         
