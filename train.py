@@ -141,12 +141,12 @@ def main():
         description="Training del MAE"
     )
     parser.add_argument(
-        'dataset_dir',
+        '--dataset-dir',
         nargs='?',
         default="/content/drive/MyDrive/Università/DeepLearning/mae_audio/datasets/tensors/balanced_train_segments",
     )
     parser.add_argument(
-        'sample_size',
+        '--sample-size',
         nargs='?',
         default=None,
     )
