@@ -32,7 +32,7 @@ class Config:
 
             # Training
             batch_size = 32,
-            learning_rate = 0.01,
+            initial_lr = 0.0001,
             lambda_recon = 10,
             epochs = 30,
             
@@ -64,6 +64,6 @@ class Config:
 
         # Training
         self.batch_size = batch_size
-        self.learning_rate = learning_rate
+        self.initial_lr = initial_lr
         self.lambda_recon = lambda_recon
         self.epochs = epochs

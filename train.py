@@ -8,8 +8,16 @@ import numpy as np
 from typing import Optional, Tuple, Dict, List
 import random 
 
+def infoNCE(class_logits, targets):
+    all_dots = torch.matmul(class_logits, targets.transpose(-1, -2))
+    log_softmax = F.log_softmax(all_dots, dim=-1)
+    loss_info_nce = -torch.mean(
+        torch.diagonal(log_softmax, dim1=-2, dim2=-1)
+    )
 
-def training_loop(model: VisionTransformer,
+    return loss_info_nce
+
+def train_one_epoch(model: VisionTransformer,
                   dataloader: torch.utils.data.DataLoader,
                   optimizer: torch.optim.Optimizer,
                   config: Config,
@@ -28,72 +36,47 @@ def training_loop(model: VisionTransformer,
 
         optimizer.zero_grad()
 
-        # Forward pass
         outputs = model(spectrogram_batch_tensor)
 
-        # --- RICOSTRUZIONE (reconstruction) ---
-        # recon_logits: [B, NumMaskedPerItem, PatchDimFlat]
+        targets = outputs["target_patches"]
+        
         recon_logits = outputs["recon_logits"]
-        # targets per la MSE: patch originali (non normalizzate, se disponibili)
-        targets_recon = outputs["target_patches"]
-
-        # Calcola la MSE loss
-        loss_recon = F.mse_loss(recon_logits, targets_recon)
-
-        # --- CLASSIFICAZIONE (InfoNCE) ---
-        # class_logits: [B, NumMaskedPerItem, EncEmbedDim]  (c_i)
+        loss_recon = F.mse_loss(recon_logits, targets)
+        
         class_logits = outputs["class_logits"]
-        # targ_embeddings: [B, NumMaskedPerItem, EncEmbedDim]
-        # Nota: per calcolare InfoNCE serve un embedding “target” con la stessa dimensione di class_logits.
-        # Assumo che il tuo modello produca anche un tensore chiamato "target_embeddings"
-        # contenente gli embedding originali dei patch mascherati.
-        targ_embeddings = outputs["target_patches"]
+        loss_info_nce = infoNCE(class_logits, targets)
+        
 
-        # Calcolo dei dot products per InfoNCE:
-        # all_dots: [B, NumMaskedPerItem, NumMaskedPerItem]
-        #   all_dots[b, i, j] = < class_logits[b,i,:], targ_embeddings[b,j,:] >
-        all_dots = torch.matmul(class_logits, targ_embeddings.transpose(-1, -2))
-
-        # Softmax lungo l’ultima dimensione (j), poi prendo il log
-        log_softmax = F.log_softmax(all_dots, dim=-1)
-
-        # La InfoNCE loss è la media negativa dei valori sulla diagonale di log_softmax
-        # perché vogliamo massimizzare la similarità dei “veri” abbinamenti (i == j)
-        loss_info_nce = -torch.mean(
-            torch.diagonal(log_softmax, dim1=-2, dim2=-1)
-        )
-
-        # --- COMBINAZIONE DELLA LOSS TOTALE ---
         combined_loss = (config.lambda_recon * loss_recon) + loss_info_nce
 
-        # Backward e ottimizzazione
         combined_loss.backward()
         optimizer.step()
 
-        # Accumulo dei valori per media epoch
         total_loss_epoch += combined_loss.item()
         total_recon_loss_epoch += loss_recon.item()
         total_NCE_loss_epoch += loss_info_nce.item()
 
-        # Log ogni 5 batch
-        if batch_idx % 5 == 0:
-            print(
-                f"  Batch {batch_idx}/{len(dataloader)}: "
-                f"Loss Tot: {combined_loss.item():.4f}, "
-                f"Loss Recon: {loss_recon.item():.4f} (x{config.lambda_recon:.2f}), "
-                f"InfoNCE Loss: {loss_info_nce.item():.4f} (x{1:.2f})"
-            )
+        # if batch_idx % 5 == 0:
+        #     print(
+        #         f"  Batch {batch_idx}/{len(dataloader)}:\n "
+        #         f"\tLoss Tot:\t{combined_loss.item():.4f}\n"
+        #         f"\tLoss Recon:\t{loss_recon.item():.4f} (x{config.lambda_recon:.2f})\n"
+        #         f"\tInfoNCE Loss:\t{loss_info_nce.item():.4f} (x{1:.2f})\n\n"
+        #     )
 
     # Calcolo delle medie sull’intero epoch
     avg_loss = total_loss_epoch / len(dataloader)
     avg_recon_loss = total_recon_loss_epoch / len(dataloader)
     avg_NCE_loss = total_NCE_loss_epoch / len(dataloader)
+    
+    curr_lr = optimizer.param_groups[0]['lr']
 
     print(
-        f"Fine Epoch: "
-        f"Avg Loss Tot: {avg_loss:.4f}, "
-        f"Avg Recon: {avg_recon_loss:.4f}, "
-        f"Avg InfoNCE: {avg_NCE_loss:.4f}"
+        f"Fine Epoch:\n"
+        f"\tAvg Loss Tot:\t{avg_loss:.4f}\n"
+        f"\tAvg Recon:\t{avg_recon_loss:.4f}\n"
+        f"\tAvg InfoNCE:\t{avg_NCE_loss:.4f}\n"
+        f"\tLearning Rate:\t{curr_lr:.6f}\n\n"
     )
 
     return avg_loss
@@ -101,17 +84,27 @@ def training_loop(model: VisionTransformer,
 
 
 if __name__ == "__main__":
-    # Impostazioni
     config = Config()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Istanzia il modello
     model = VisionTransformer(config).to(device)
 
-    # Optimizer
-    optimizer = optim.AdamW(model.parameters(), lr=config.learning_rate)
+    optimizer = optim.Adam(
+        model.parameters(), 
+        lr=config.initial_lr, 
+        weight_decay=0.01
+    )
 
+    def polynomial_decay(epoch):
+        # Calculate the current decay factor
+        max_epochs = config.epochs
+        power = 2.0  # Use power=2.0 for polynomial decay
+        decay_factor = (1 - epoch / max_epochs) ** power
+        return decay_factor
+    
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=polynomial_decay)
+    
     # Dataloader Fittizio
     # Crea dati di esempio: Batch_Size, Channels, Height, Width
     # Le dimensioni H, W devono essere divisibili per patch_size
@@ -133,8 +126,15 @@ if __name__ == "__main__":
     print("Inizio Training Fittizio...")
     for epoch in range(1, config.epochs + 1):
         print(f"--- Epoch {epoch} ---")
-        avg_epoch_loss = training_loop(model, dummy_dataloader, optimizer, config, device)
-        # Qui potresti aggiungere logica per il salvataggio del modello, validazione, ecc.
+        avg_epoch_loss = train_one_epoch(
+            model, 
+            dummy_dataloader, 
+            optimizer, 
+            config, 
+            device
+        )
+        scheduler.step()
+
     print("Fine Training Fittizio.")
 
 
