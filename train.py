@@ -147,9 +147,11 @@ def main():
     )
     parser.add_argument(
         '--sample-size',
-        nargs='?',
+        type=int,
         default=None,
+        help="Numero di campioni da utilizzare (intero). Se non specificato, viene usato l'intero dataset."
     )
+    
     args = parser.parse_args()
     dataset_dir = args.dataset_dir
     sample_size = args.sample_size
