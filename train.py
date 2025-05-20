@@ -7,6 +7,60 @@ from config import Config
 import numpy as np
 from typing import Optional, Tuple, Dict, List
 import random 
+import torch
+from torch.utils.data import Dataset, DataLoader
+import os
+import numpy as np
+from pathlib import Path
+import random
+
+class BalancedTrainDataset(Dataset):
+    def __init__(self, data_dir, sample_size = None):
+        
+        self.file_paths = []
+        
+        if isinstance(data_dir, (list, tuple)):
+            for dir_path in data_dir:
+                self._load_files(Path(dir_path))
+        else:
+            self._load_files(Path(data_dir))
+        
+        if sample_size is not None and sample_size < len(self.file_paths):
+            self.file_paths = random.sample(self.file_paths, sample_size)
+        
+        print(f"Dataset creato con {len(self.file_paths)} spettrogrammi")
+        
+    def _load_files(self, directory):
+        if directory.is_dir():
+            files = list(directory.glob(f"**/*.pt"))
+            self.file_paths.extend(files)
+            print(f"Caricati {len(files)} file da {directory}")
+        else:
+            print(f"Attenzione: {directory} non è una directory valida")
+    
+ 
+    def _load_spectrogram(self, file_path):
+        """Carica uno spettrogramma da file."""
+        try:
+            if str(file_path).endswith('.pt'):
+                return torch.load(file_path, map_location='cpu')
+            else:
+                raise ValueError(f"Formato file non supportato: {file_path}")
+        except Exception as e:
+            print(f"Errore nel caricamento di {file_path}: {e}")
+            return torch.zeros((1, 1, 128, 128))  
+    
+    def __len__(self):
+        return len(self.file_paths)
+    
+    def __getitem__(self, idx):
+        """
+        Restituisce uno spettrogramma. 
+        """
+        file_path = self.file_paths[idx]
+        spectrogram = self._load_spectrogram(file_path)
+        return spectrogram
+
 
 def infoNCE(class_logits, targets):
     all_dots = torch.matmul(class_logits, targets.transpose(-1, -2))
@@ -81,9 +135,19 @@ def train_one_epoch(model: VisionTransformer,
 
     return avg_loss
 
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Training del MAE"
+    )
+    parser.add_argument(
+        'dataset_dir',
+        nargs='?',
+        default="/content/drive/MyDrive/Università/DeepLearning/mae_audio/datasets/tensors/balanced_train_segments",
+    )
+    args = parser.parse_args()
+    dataset_dir = args.dataset_dir
 
-
-if __name__ == "__main__":
     config = Config()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -104,38 +168,52 @@ if __name__ == "__main__":
         return decay_factor
     
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=polynomial_decay)
+
+    dataset = BalancedTrainDataset(dataset_dir)
     
-    # Dataloader Fittizio
-    # Crea dati di esempio: Batch_Size, Channels, Height, Width
-    # Le dimensioni H, W devono essere divisibili per patch_size
-    dummy_data = []
-    for _ in range(200): # 20 campioni fittizi
-        # Calcola altezza e larghezza valide per essere divisibili per patch_size
-        img_width = 896
-        img_height = 128
-        valid_h = (img_height // config.patch_size[0]) * config.patch_size[0]
-        valid_w = (img_width // config.patch_size[1]) * config.patch_size[1]
-        if valid_h != img_height or valid_w != img_width:
-            print(f"Attenzione: img_height/width adattate a {valid_h}x{valid_w} per divisibilità patch.")
-        dummy_spectrogram = torch.randn(1, valid_h, valid_w)
-        dummy_data.append(dummy_spectrogram)
+    # Creazione del DataLoader
+    dataloader = DataLoader(
+        dataset, 
+        batch_size=32, 
+        shuffle=True,  # Shuffle per training self-supervised
+        num_workers=4, 
+        pin_memory=True
+    )
+
+    # dummy_data = []
+    # for _ in range(200): # 20 campioni fittizi
+    #     # Calcola altezza e larghezza valide per essere divisibili per patch_size
+    #     img_width = 896
+    #     img_height = 128
+    #     valid_h = (img_height // config.patch_size[0]) * config.patch_size[0]
+    #     valid_w = (img_width // config.patch_size[1]) * config.patch_size[1]
+    #     if valid_h != img_height or valid_w != img_width:
+    #         print(f"Attenzione: img_height/width adattate a {valid_h}x{valid_w} per divisibilità patch.")
+    #     dummy_spectrogram = torch.randn(1, valid_h, valid_w)
+    #     dummy_data.append(dummy_spectrogram)
     
-    dummy_dataset = torch.utils.data.TensorDataset(torch.stack(dummy_data))
-    dummy_dataloader = torch.utils.data.DataLoader(dummy_dataset, batch_size=config.batch_size)
+    # dummy_dataset = torch.utils.data.TensorDataset(torch.stack(dummy_data))
+    # dataloader = torch.utils.data.DataLoader(dummy_dataset, batch_size=config.batch_size)
 
     print("Inizio Training Fittizio...")
     for epoch in range(1, config.epochs + 1):
         print(f"--- Epoch {epoch} ---")
         avg_epoch_loss = train_one_epoch(
             model, 
-            dummy_dataloader, 
+            dataloader, 
             optimizer, 
             config, 
             device
         )
         scheduler.step()
 
-    print("Fine Training Fittizio.")
+    print(f"Fine training con una avg loss di {avg_epoch_loss}.")
+
+
+if __name__ == "__main__":
+    main()
+
+    
 
 
 # import os

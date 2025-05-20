@@ -12,7 +12,7 @@ class Config:
             n_mel_bins = 128, # numero di bins del mel spectrogram (asse y)
             num_channels = 1,
             patch_embedding_dropout = 0.1,
-
+                
             # Masking 
             masking_strategy = "random", # tipo di mascheramento
             masking_percentage = 0.75, # percentuale delle patches che vogliamo mascherare
@@ -44,7 +44,7 @@ class Config:
         self.num_channels = num_channels
         self.n_mel_bins = n_mel_bins
         self.patch_embedding_dropout = patch_embedding_dropout
-        
+
         # Masking 
         self.masking_strategy = masking_strategy
         self.masking_percentage = masking_percentage

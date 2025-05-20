@@ -13,7 +13,6 @@ class Mask(nn.Module):
 
     def forward(self, patch_embeddings: torch.Tensor) -> torch.Tensor:
         B, num_patches, patch_embedding_dim = patch_embeddings.shape
-        original_patch_embedding = patch_embeddings.detach().clone()
         total_patches_to_mask = int(self.masking_percentage * num_patches)
         total_patches_to_not_mask = num_patches - total_patches_to_mask
 

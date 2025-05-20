@@ -41,13 +41,13 @@ class PatchEmbedding(nn.Module):
         patch_embeddings = patch_embeddings.transpose(-1,-2) # in questo modo diamo al tranformer una lista di embeddings
         # print(f"Patch embeddings shape after transpose: {patch_embeddings.shape}")
 
-        original_patch_embeddings = patch_embeddings
+        patch_embeddings = patch_embeddings
 
         # [B, num_patches, patch_embedding_dim] -> [B, num_patches, enc_embed_dim]
-        patch_embeddings = self.linear(patch_embeddings) 
+        patch_embeddings_after_proj = self.linear(patch_embeddings) 
         # print(f"Patch embeddings shape after linear layer: {patch_embeddings.shape}")
         
-        patch_embeddings = self.dropout(patch_embeddings)
+        patch_embeddings_after_proj = self.dropout(patch_embeddings_after_proj)
         
-        return original_patch_embeddings, patch_embeddings
+        return patch_embeddings, patch_embeddings_after_proj
     

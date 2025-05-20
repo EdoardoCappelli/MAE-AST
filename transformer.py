@@ -138,16 +138,16 @@ class VisionTransformer(nn.Module):
         self.enc_embed_dim = config.enc_embed_dim
         self.dec_embed_dim = config.dec_embed_dim
 
-        # [B, num_patches, embed_dim]
-        self.patch_embeddings = PatchEmbedding(config) # patches estratte da ogni spettrogramma e convertite in embedding  
+        self.batch_norm = nn.BatchNorm2d(num_features=1, affine=False)
+        self.patch_embeddings = PatchEmbedding(config) # [B, num_patches, embed_dim]  
         self.mask = Mask(config) 
-        self.position_embedding_before_encoder = SinusoidalPositionalEncoding(embed_dim=self.enc_embed_dim)
+        self.positional_embeddings_before_encoder = SinusoidalPositionalEncoding(embed_dim=self.enc_embed_dim)
         self.encoder = MAE_Encoder(config) # sara una lista di TransformerLayer 
         self.post_enc_layernorm = nn.LayerNorm(config.enc_embed_dim, eps=config.enc_layer_norm_eps)
         self.linear = nn.Linear(self.enc_embed_dim, self.dec_embed_dim)
         
         self.decoder_mask_emb = nn.Parameter(torch.FloatTensor(config.dec_embed_dim).uniform_()) # è l'embedding che rappresenta la patch mascherata e dovrebbe essere appresa durante il training
-        self.position_embedding_before_decoder = SinusoidalPositionalEncoding(embed_dim=self.dec_embed_dim)
+        self.positional_embeddings_before_decoder = SinusoidalPositionalEncoding(embed_dim=self.dec_embed_dim)
         self.decoder = MAE_Encoder(config, decoder=True)
         
         self.final_proj_reconstruction = nn.Linear(
@@ -161,28 +161,26 @@ class VisionTransformer(nn.Module):
     
     def forward(self, spectrogram_values:torch.Tensor) -> torch.Tensor:
         B = spectrogram_values.shape[0]
-        # print("spectrogram_values: ", spectrogram_values.shape)
+        spectrogram_values = self.batch_norm(spectrogram_values) * 0.5
+        patch_embeddings, patch_embeddings_after_proj =  self.patch_embeddings(spectrogram_values) # [B, C, H, W] -> [B, num_patches, patch_embed_dim] 
+        masked_patch_embeddings, masked_indices, unmasked_indices = self.mask(patch_embeddings_after_proj) 
+        positional_embeddings = self.positional_embeddings_before_encoder(masked_patch_embeddings)
+        masked_patch_embeddings_with_pe = masked_patch_embeddings + positional_embeddings
 
-        # [B, C, H, W] -> [B, num_patches, patch_embed_dim] 
-        original_patch_embeddings, patch_embeddings =  self.patch_embeddings(spectrogram_values) # estraggo patches e converto in embedding (con positional embedding)
-        masked_patch_embeddings, masked_indices, unmasked_indices = self.mask(patch_embeddings) 
-        masked_patch_embeddings_with_position = masked_patch_embeddings + self.position_embedding_before_encoder(masked_patch_embeddings)
-        
-        not_masked_patches = []
+        encoder_input = []
         for b in range(B):
-            visible_b = masked_patch_embeddings[b, unmasked_indices[b], :].float()
-            not_masked_patches.append(visible_b)
+            visible_b = masked_patch_embeddings_with_pe[b, unmasked_indices[b], :].float()
+            encoder_input.append(visible_b)
+        encoder_input = torch.stack(encoder_input, dim=0)
 
-        not_masked_patches = torch.stack(not_masked_patches, dim=0)  # [B, N-M, enc_embed_dim]
-        
-        encoder_output = self.encoder(not_masked_patches)
+        encoder_output = self.encoder(encoder_input)
         encoder_output = self.post_enc_layernorm(encoder_output)
 
         if self.enc_embed_dim != self.dec_embed_dim:
             encoder_output = self.linear(encoder_output) # [B, num_patches, enc_embed_dim] -> [B, num_patches, dec_embed_dim]
 
         # Add masked patches to encoder output
-        N_patches = masked_patch_embeddings_with_position.size(1)
+        N_patches = masked_patch_embeddings_with_pe.size(1)
         patch_embeddings_recostructed = torch.zeros(
             (B, N_patches, self.dec_embed_dim), 
             device=encoder_output.device, 
@@ -195,39 +193,36 @@ class VisionTransformer(nn.Module):
         )
 
         for b in range(B):
-            # encoder output shape: [B, patch_non_nascherate, patch_dim]
+            # encoder output shape: [B, patch_non_mascherate, patch_dim]
             patch_embeddings_recostructed[b, unmasked_indices[b], :] = encoder_output[b]
-            
-            # patch_embeddings_recostructed[b, masked_indices[b]] = self.decoder_mask_emb
             mask_tokens = self.decoder_mask_emb.unsqueeze(0).expand(len(masked_indices[0]), -1)
             patch_embeddings_recostructed[b, masked_indices[b], :] = mask_tokens
             
-            # c) segno in mask_indices_bool quali posizioni sono mascherate
             mask_indices_bool[b, masked_indices[b]] = True
-
-        patch_embeddings_recostructed_with_position = patch_embeddings_recostructed + self.position_embedding_before_decoder(patch_embeddings_recostructed)
         
-        decoder_output = self.decoder(patch_embeddings_recostructed_with_position) 
+        patch_embeddings_recostructed_with_pe = self.positional_embeddings_before_decoder(patch_embeddings_recostructed) + patch_embeddings_recostructed 
+        
+        decoder_output = self.decoder(patch_embeddings_recostructed_with_pe) 
         # print("Decoder output shape:", decoder_output.shape) 
         
         # recupero patch che avevo mascherato
         batch_idx = torch.arange(B, device=decoder_output.device).unsqueeze(-1)  # → [B, 1]
-        masked_patches_after_decoder = decoder_output[batch_idx, masked_indices, :]  
+        decoded_masked_patches = decoder_output[batch_idx, masked_indices, :]  
         # print("masked_patches_after_decoder shape: ", masked_patches_after_decoder.shape)
-        recostruction_logits = self.final_proj_reconstruction(masked_patches_after_decoder) # [B, N_masked, patch_size^2]
-        classification_logits = self.final_proj_classification(masked_patches_after_decoder) # [B, N_masked, patch_size^2]
+        recostruction_logits = self.final_proj_reconstruction(decoded_masked_patches) # [B, N_masked, patch_size]
+        classification_logits = self.final_proj_classification(decoded_masked_patches) # [B, N_masked, patch_size]
 
-        patch_dim = original_patch_embeddings.size(-1) 
+        patch_dim = patch_embeddings.size(-1) 
         # print(f"patch_dim: {patch_dim}")
 
         target_patches = torch.zeros(
             (B, len(masked_indices[0]), patch_dim),
-            device=original_patch_embeddings.device,
-            dtype=original_patch_embeddings.dtype
+            device=patch_embeddings.device,
+            dtype=patch_embeddings.dtype
         )
         
         for b in range(B):
-            target_patches[b] = original_patch_embeddings[b, masked_indices[b], :]
+            target_patches[b] = patch_embeddings[b, masked_indices[b], :]
 
         return {
             "encoder_output": encoder_output,
