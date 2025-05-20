@@ -116,7 +116,7 @@ if __name__ == "__main__":
     # Crea dati di esempio: Batch_Size, Channels, Height, Width
     # Le dimensioni H, W devono essere divisibili per patch_size
     dummy_data = []
-    for _ in range(20): # 20 campioni fittizi
+    for _ in range(200): # 20 campioni fittizi
         # Calcola altezza e larghezza valide per essere divisibili per patch_size
         img_width = 896
         img_height = 128
