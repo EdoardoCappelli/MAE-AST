@@ -164,7 +164,7 @@ class VisionTransformer(nn.Module):
         # print("spectrogram_values: ", spectrogram_values.shape)
 
         # [B, C, H, W] -> [B, num_patches, patch_embed_dim] 
-        patch_embeddings =  self.patch_embeddings(spectrogram_values) # estraggo patches e converto in embedding (con positional embedding)
+        original_patch_embeddings, patch_embeddings =  self.patch_embeddings(spectrogram_values) # estraggo patches e converto in embedding (con positional embedding)
         masked_patch_embeddings, masked_indices, unmasked_indices = self.mask(patch_embeddings) 
         masked_patch_embeddings_with_position = masked_patch_embeddings + self.position_embedding_before_encoder(masked_patch_embeddings)
         
@@ -217,24 +217,25 @@ class VisionTransformer(nn.Module):
         recostruction_logits = self.final_proj_reconstruction(masked_patches_after_decoder) # [B, N_masked, patch_size^2]
         classification_logits = self.final_proj_classification(masked_patches_after_decoder) # [B, N_masked, patch_size^2]
 
-        patch_dim = patch_embeddings.size(-1) 
+        patch_dim = original_patch_embeddings.size(-1) 
         # print(f"patch_dim: {patch_dim}")
 
         target_patches = torch.zeros(
             (B, len(masked_indices[0]), patch_dim),
-            device=patch_embeddings.device,
-            dtype=patch_embeddings.dtype
+            device=original_patch_embeddings.device,
+            dtype=original_patch_embeddings.dtype
         )
         
         for b in range(B):
-            target_patches[b] = patch_embeddings[b, masked_indices[b], :]
+            target_patches[b] = original_patch_embeddings[b, masked_indices[b], :]
 
         return {
             "encoder_output": encoder_output,
             "decoder_output": decoder_output,
             "recon_logits": recostruction_logits,
             "class_logits": classification_logits,
-            "target_patches": target_patches
+            "target_patches": target_patches,
+
         }
     
 def test_model():

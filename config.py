@@ -29,6 +29,13 @@ class Config:
             # Decoder
             num_dec_hidden_layers = 2,
             dec_embed_dim = 768,
+
+            # Training
+            batch_size = 32,
+            learning_rate = 0.01,
+            lambda_recon = 10,
+            epochs = 10,
+            
             **kwargs
     ):
         super().__init__()
@@ -54,3 +61,9 @@ class Config:
         # Decoder
         self.dec_embed_dim = dec_embed_dim
         self.num_dec_hidden_layers = num_dec_hidden_layers
+
+        # Training
+        self.batch_size = batch_size
+        self.learning_rate = learning_rate
+        self.lambda_recon = lambda_recon
+        self.epochs = epochs

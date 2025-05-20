@@ -49,5 +49,5 @@ class PatchEmbedding(nn.Module):
         
         patch_embeddings = self.dropout(patch_embeddings)
         
-        return patch_embeddings
+        return original_patch_embeddings, patch_embeddings
     
