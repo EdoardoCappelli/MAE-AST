@@ -20,7 +20,7 @@ def convert_npy_to_tensors(input_dir, output_dir):
         try:
             # Carica il file .npy
             spectrogram_np = np.load(str(npy_file))
-            
+            print(str(npy_file))
             # Converti in tensor e applica le trasformazioni
             spectrogram = torch.from_numpy(spectrogram_np)
             spectrogram = spectrogram.unsqueeze(0).unsqueeze(0)  # [B, C, W, H]

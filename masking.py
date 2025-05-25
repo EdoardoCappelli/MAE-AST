@@ -26,22 +26,14 @@ class Mask(nn.Module):
         
         # Applicazione della permutazione alla maschera
         bool_mask = bool_mask.gather(dim=1, index=perm)
-        print(f"bool_mask:\n{bool_mask}")
-        print(f"bool_mask:\n{bool_mask.shape}") # B, num_patches
-        
         bool_mask = bool_mask.unsqueeze(-1).expand(-1, -1, patch_embedding_dim)
 
-        print(f"bool_mask:\n{bool_mask}")
         
         # Preparazione del mask embedding
         encoder_mask = self.encoder_mask_emb.view(1, 1, -1).expand(B, -1, -1)
-        print(f"encoder_mask:\n{encoder_mask}")
-
-        print(f"patch_embeddings:\n{patch_embeddings}")
 
         # Patches complete con mask embedding applicato
         patch_embeddings_with_mask_embeddings = torch.where(bool_mask, encoder_mask, patch_embeddings)
-        print(f"patch_embeddings_with_mask_embeddings:\n{patch_embeddings_with_mask_embeddings}")
         
         # Estrazione degli indici mascherati e non mascherati
         masked_indices = []
@@ -52,10 +44,6 @@ class Mask(nn.Module):
             unmasked_idx = torch.where(~bool_mask[b, :, 0])[0]
             masked_indices.append(masked_idx)
             unmasked_indices.append(unmasked_idx)
-            print(f"masked_idx:\n{masked_idx}")
-            print(f"unmasked_idx:\n{unmasked_idx}")
-        print(f"masked_indices:\n{masked_indices}")
-        print(f"unmasked_indices:\n{unmasked_indices}")
         
         # Estrazione delle patches non mascherate per l'encoder
         unmasked_patches_only = []
@@ -63,12 +51,9 @@ class Mask(nn.Module):
             unmasked_patches_only.append(patch_embeddings[b, unmasked_indices[b]])
         unmasked_patches_only = torch.stack(unmasked_patches_only)
        
-        print(f"unmasked_patches_only:\n{unmasked_patches_only}")
-
         return patch_embeddings_with_mask_embeddings, unmasked_patches_only, bool_mask, masked_indices, unmasked_indices
         
 def test():
-    
     config = SimpleNamespace(
         masking_percentage=0.75,    
         masking_strategy="random",   
@@ -164,18 +149,6 @@ def test():
 
     print(f"pe:\n{pe}")
 
-    # pe_for_unmasked_pathes_only = []
-    # pe_unmasked_indices = []
-
-    # for b in range(B):
-    #     pe_unmasked_idx = torch.where(~bool_mask[b,:,0])[0]
-    #     pe_unmasked_indices.append(pe_unmasked_idx)
-    # print(f"pe_unmasked_indices:\n{pe_unmasked_indices}")
-    
-
-    # for b in range(B):
-    #     idx = pe_unmasked_indices[b].item()
-    #     pe_for_unmasked_pathes_only.append(pe[b, 0, idx, :])
     pe_for_unmasked_pathes_only = []
     pe_unmasked_indices = []
 

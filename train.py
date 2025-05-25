@@ -140,10 +140,9 @@ def main():
 
 
     config = Config()
-    dataset_dir = config.dataset_dir
+    dataset_dir = config.tensor_dir
     sample_size = config.sample_size
 
-    config = Config()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -166,14 +165,12 @@ def main():
     
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=polynomial_decay)
 
-    dataset = BalancedTrainDataset(dataset_dir, sample_size=sample_size)
+    dataset = BalancedTrainDataset(data_dir=dataset_dir, sample_size=sample_size)
     
-    # Creazione del DataLoader
     dataloader = DataLoader(
-        dataset, 
+        dataset=dataset, 
         batch_size=config.batch_size, 
         shuffle=True,  # Shuffle per training self-supervised
-        num_workers=4, 
         pin_memory=True
     )
 
@@ -192,7 +189,13 @@ def main():
     print(f"Fine training con una avg loss di {avg_epoch_loss}.")
 
 if __name__ == "__main__":
+    from pathlib import Path
+    data_dir = Path(r"C:/Users/admin/Desktop/VS Code/MAE-AST/tensors")
+    files = list(data_dir.glob("**/*.pt"))
+    print("Found", len(files), ".pt files:", files[:5])
+
     main()
+
     
 
 

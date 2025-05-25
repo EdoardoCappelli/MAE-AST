@@ -209,7 +209,7 @@ class MAE(nn.Module):
 
         spectrogram_values = self.batch_norm(spectrogram_values) * 0.5
         patch_embeddings, patch_embeddings_after_proj =  self.patch_embeddings(spectrogram_values) # [B, num_patches, patch_embed_dim] 
-        print(f"patch_embeddings: {patch_embeddings_after_proj.shape}")
+
         B, num_patches, _ = patch_embeddings.shape
         (
             patch_embeddings_with_mask_embeddings, 
@@ -238,8 +238,6 @@ class MAE(nn.Module):
         
         encoder_output = self.encoder(unmasked_patches_only_with_pe)
 
-        print(f"encoder_output:\n{encoder_output}")
-
         if self.enc_embed_dim != self.dec_embed_dim:
             encoder_output = self.linear(encoder_output) # [B, num_patches, enc_embed_dim] -> [B, num_patches, dec_embed_dim]
         
@@ -259,7 +257,6 @@ class MAE(nn.Module):
 
         decoder_input = decoder_input + self.positional_embeddings_before_decoder(patch_embeddings_with_mask_embeddings)  # (B, num_patches, D_dec)
         decoder_output = self.decoder(decoder_input) 
-        print(f"decoder_output:\n{decoder_output}")
         
         # B_indices = torch.arange(B, device=decoder_output.device).unsqueeze(1)  # (B, 1)
         # recon_masked = []
@@ -280,8 +277,6 @@ class MAE(nn.Module):
 def test():
     config = Config()
     model = MAE(config)
-    print(model)
-
     
     # print(spectrogram.shape) # 999, 128
 
