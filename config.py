@@ -34,6 +34,7 @@ class Config:
             lambda_recon = 10,
             epochs = 50,
             weight_decay = 0.05,
+            sample_size = 500,
             dataset_dir = "D:/data/spectrograms/balanced_train_segments",
             checkpoints_dir = "D:/checkpoints",
             npy_dir = "D:/data/npys/balanced_train_segments",
@@ -80,3 +81,4 @@ class Config:
         self.checkpoints_dir = checkpoints_dir
         self.npy_dir = npy_dir
         self.tensor_dir = tensor_dir
+        self.sample_size = sample_size
