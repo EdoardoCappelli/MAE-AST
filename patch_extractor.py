@@ -5,6 +5,7 @@ import math
 import matplotlib.pyplot as plt
 import os
 from positional_encoding import SinusoidalPositionalEncoding
+from utils.visualize import visualize_patches
 
 class PatchEmbedding(nn.Module):
     
@@ -34,14 +35,12 @@ class PatchEmbedding(nn.Module):
         ) -> torch.Tensor:
         
         # [B, C, H, W] -> [B, patch_embedding_dim, num_patches]
-        patch_embeddings = self.patch_embedding(spectrogram_values) # estraggo le patches usando la convoluzione
+        patch_embeddings = self.patch_embedding(spectrogram_values) # ogni colonna rappresenta gli indici di una patch
         # print(f"Patch embeddings shape: {patch_embeddings.shape}") 
+        # visualize_patches(patch_embeddings, "patch_embeddings")
         
         # [B, embed_dim, num_patches] -> [B, num_patches, patch_embedding_dim] 
-        patch_embeddings = patch_embeddings.transpose(-1,-2) # in questo modo diamo al tranformer una lista di embeddings
-        # print(f"Patch embeddings shape after transpose: {patch_embeddings.shape}")
-
-        patch_embeddings = patch_embeddings
+        patch_embeddings = patch_embeddings.transpose(-1,-2) # ogni colonna rappresenta gli indici di una patch [B, numero_patches, dimensione_patch]
 
         # [B, num_patches, patch_embedding_dim] -> [B, num_patches, enc_embed_dim]
         patch_embeddings_after_proj = self.linear(patch_embeddings) 

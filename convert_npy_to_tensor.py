@@ -3,16 +3,9 @@ import torch
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
-import argparse
+from config import Config
 
 def convert_npy_to_tensors(input_dir, output_dir):
-    """
-    Converte tutti i file .npy in una cartella in tensori PyTorch, applicando specifiche trasformazioni.
-    
-    Args:
-        input_dir (str): Path alla cartella contenente i file .npy
-        output_dir (str): Path alla cartella dove salvare i tensori convertiti
-    """
     # Crea la cartella di output se non esiste
     os.makedirs(output_dir, exist_ok=True)
     
@@ -46,12 +39,10 @@ def convert_npy_to_tensors(input_dir, output_dir):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Convert .wav to mel spectrogram')
-    parser.add_argument('--npy_dir', type=str, help='Path to the directory containing .npy files')
-    parser.add_argument('--out_dir', type=str, help='Path to save the tensors')
-    args = parser.parse_args()
 
-    convert_npy_to_tensors(args.npy_dir, args.out_dir)
+    config = Config()
+
+    convert_npy_to_tensors(config.npy_dir, config.tensor_dir)
 
 if __name__ == '__main__':
     main()

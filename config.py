@@ -1,8 +1,3 @@
-from typing import Optional, Tuple
-import torch
-import torch.nn as nn
-
-
 class Config:
 
     def __init__(
@@ -19,9 +14,9 @@ class Config:
             
             # Encoder 
             enc_embed_dim=768, # dimensione dell'embedding vector
-            enc_mlp_layer_dim=3072, # dimensione linear layer del FFN
-            num_enc_hidden_layers = 1, # layers del vision tranformer
-            num_enc_attention_heads = 12, # heads del multi head attention
+            enc_mlp_layer_dim=3072, # dimensione linear layer del FFN 3072
+            num_enc_hidden_layers = 4, # layers del vision tranformer
+            num_enc_attention_heads = 4, # heads del multi head attention
             patch_size = (16,16), # ogni immagine verrà divisa in patch 16x16
             enc_layer_norm_eps = 1e-6, 
             enc_attention_dropout = 0.0,
@@ -29,13 +24,21 @@ class Config:
             # Decoder
             num_dec_hidden_layers = 2,
             dec_embed_dim = 768,
+            num_dec_attention_heads = 4, # heads del multi head attention
+            dec_layer_norm_eps = 1e-6, 
+            dec_attention_dropout = 0.0,
 
             # Training
             batch_size = 32,
             initial_lr = 0.0001,
             lambda_recon = 10,
-            epochs = 30,
-            
+            epochs = 50,
+            weight_decay = 0.05,
+            dataset_dir = "D:/data/spectrograms/balanced_train_segments",
+            checkpoints_dir = "D:/checkpoints",
+            npy_dir = "D:/data/npys/balanced_train_segments",
+            tensor_dir = "D:/data/tensors/balanced_train_segments",
+
             **kwargs
     ):
         super().__init__()
@@ -61,9 +64,19 @@ class Config:
         # Decoder
         self.dec_embed_dim = dec_embed_dim
         self.num_dec_hidden_layers = num_dec_hidden_layers
+        self.num_dec_hidden_layers= num_dec_hidden_layers
+        self.num_dec_attention_heads = num_dec_attention_heads
+        self.dec_layer_norm_eps = dec_layer_norm_eps
+        self.dec_attention_dropout = dec_attention_dropout
+
 
         # Training
         self.batch_size = batch_size
         self.initial_lr = initial_lr
         self.lambda_recon = lambda_recon
         self.epochs = epochs
+        self.weight_decay = weight_decay
+        self.dataset_dir = dataset_dir
+        self.checkpoints_dir = checkpoints_dir
+        self.npy_dir = npy_dir
+        self.tensor_dir = tensor_dir
