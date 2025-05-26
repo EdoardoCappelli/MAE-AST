@@ -7,6 +7,7 @@ class Config:
             n_mel_bins = 128, # numero di bins del mel spectrogram (asse y)
             num_channels = 1,
             patch_embedding_dropout = 0.1,
+            img_size =  (900, 128),
                 
             # Masking 
             masking_strategy = "random", # tipo di mascheramento
@@ -34,7 +35,7 @@ class Config:
             lambda_recon = 10,
             epochs = 50,
             weight_decay = 0.05,
-            sample_size = 1000,
+            sample_size = 4000,
             dataset_dir = "D:/data/spectrograms/balanced_train_segments",
             checkpoints_dir = "D:/checkpoints",
             npy_dir = "MAE-AST/spectrograms/balanced_train_segments",
@@ -48,6 +49,7 @@ class Config:
         self.num_channels = num_channels
         self.n_mel_bins = n_mel_bins
         self.patch_embedding_dropout = patch_embedding_dropout
+        self.img_size = img_size
 
         # Masking 
         self.masking_strategy = masking_strategy
