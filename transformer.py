@@ -156,7 +156,7 @@ class MAE(nn.Module):
         self.enc_embed_dim = config.enc_embed_dim
         self.dec_embed_dim = config.dec_embed_dim
 
-        self.batch_norm = nn.BatchNorm2d(num_features=1, affine=False)
+        self.batch_norm = nn.BatchNorm2d(num_features=config.num_channels, affine=False)
         self.patch_embeddings = PatchEmbedding(config) # [B, num_patches, embed_dim]  
         self.mask = Mask(config) 
         self.positional_embeddings_before_encoder = SinusoidalPositionalEncoding(embed_dim=self.enc_embed_dim)
@@ -169,12 +169,12 @@ class MAE(nn.Module):
         
         self.final_proj_reconstruction = nn.Linear(
             config.dec_embed_dim,
-            config.patch_size[0] * config.patch_size[1],
+            config.patch_size[0] * config.patch_size[1] * config.num_channels,
             bias=True
         )
         self.final_proj_classification = nn.Linear(
             config.dec_embed_dim,
-            config.patch_size[0] * config.patch_size[1],
+            config.patch_size[0] * config.patch_size[1] * config.num_channels,
             bias=True
         )
 
@@ -257,21 +257,28 @@ class MAE(nn.Module):
 
         decoder_input = decoder_input + self.positional_embeddings_before_decoder(patch_embeddings_with_mask_embeddings)  # (B, num_patches, D_dec)
         decoder_output = self.decoder(decoder_input) 
-        
+       
+        predicted_masked_patches_list = []
+        for i in range(decoder_output.shape[0]):  
+            indices_for_batch_item = masked_indices[i] 
+            predictions_for_masked = decoder_output[i, indices_for_batch_item, :]
+            predicted_masked_patches_list.append(predictions_for_masked)
+
+        predicted_masked_patches = torch.stack(predicted_masked_patches_list, dim=0)
         # B_indices = torch.arange(B, device=decoder_output.device).unsqueeze(1)  # (B, 1)
         # recon_masked = []
         # for b in range(B):
         #     recon_masked.append(decoder_output[b, masked_indices[b], :])  # (M, D_dec)
         # recon_masked = torch.stack(recon_masked, dim=0)
 
-        recostruction_logits = self.final_proj_reconstruction(decoder_output)
-        classification_logits = self.final_proj_reconstruction(decoder_output)
-        # target_patches = self.get_original_patches(patch_embeddings, masked_indices)
+        recostruction_logits = self.final_proj_reconstruction(predicted_masked_patches)
+        classification_logits = self.final_proj_reconstruction(predicted_masked_patches)
+        target_patches = self.get_original_patches(patch_embeddings, masked_indices)
         
         return {
             "recon_logits": recostruction_logits,
             "class_logits": classification_logits,
-            "target_patches": patch_embeddings,
+            "target_patches": target_patches,
         }
     
 def test():
