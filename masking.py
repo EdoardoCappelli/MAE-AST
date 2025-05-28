@@ -20,38 +20,75 @@ class Mask(nn.Module):
         # Generazione della permutazione casuale per ogni batch
         perm = torch.rand(B, num_patches, device=patch_embeddings.device).argsort(dim=1)
         
-        # Creazione della maschera binaria
-        bool_mask = torch.zeros((B, num_patches), dtype=torch.bool, device=patch_embeddings.device)
-        bool_mask[:, :total_patches_to_mask] = True
+        # Creazione degli indici mascherati e non mascherati PRIMA della permutazione
+        # I primi total_patches_to_mask saranno mascherati dopo la permutazione
+        masked_indices = perm[:, :total_patches_to_mask]  # (B, num_masked)
+        unmasked_indices = perm[:, total_patches_to_mask:]  # (B, num_unmasked)
         
-        # Applicazione della permutazione alla maschera
-        bool_mask = bool_mask.gather(dim=1, index=perm)
-        bool_mask = bool_mask.unsqueeze(-1).expand(-1, -1, patch_embedding_dim)
-
+        # Creazione della maschera binaria (True = mascherato)
+        bool_mask = torch.zeros((B, num_patches), dtype=torch.bool, device=patch_embeddings.device)
+        bool_mask.scatter_(dim=1, index=masked_indices, value=True)
+        
+        # Espansione della maschera per le dimensioni delle patch embeddings
+        bool_mask_expanded = bool_mask.unsqueeze(-1).expand(-1, -1, patch_embedding_dim)
         
         # Preparazione del mask embedding
-        encoder_mask = self.encoder_mask_emb.view(1, 1, -1).expand(B, -1, -1)
-
-        # Patches complete con mask embedding applicato
-        patch_embeddings_with_mask_embeddings = torch.where(bool_mask, encoder_mask, patch_embeddings)
+        encoder_mask = self.encoder_mask_emb.view(1, 1, -1).expand(B, num_patches, -1)
         
-        # Estrazione degli indici mascherati e non mascherati
-        masked_indices = []
-        unmasked_indices = []
-
-        for b in range(B):
-            masked_idx = torch.where(bool_mask[b, :, 0])[0] # prendo solo la prima colonna tanto sono tutte uguali (le patch sono per riga)
-            unmasked_idx = torch.where(~bool_mask[b, :, 0])[0]
-            masked_indices.append(masked_idx)
-            unmasked_indices.append(unmasked_idx)
+        # Applicazione del mask embedding alle posizioni mascherate
+        patch_embeddings_with_mask = torch.where(bool_mask_expanded, encoder_mask, patch_embeddings)
         
-        # Estrazione delle patches non mascherate per l'encoder
-        unmasked_patches_only = []
-        for b in range(B):
-            unmasked_patches_only.append(patch_embeddings[b, unmasked_indices[b]])
-        unmasked_patches_only = torch.stack(unmasked_patches_only)
+        # Estrazione delle patch non mascherate usando advanced indexing
+        # Questo è più efficiente del loop
+        batch_indices = torch.arange(B, device=patch_embeddings.device).unsqueeze(1)
+        unmasked_patches_only = patch_embeddings[batch_indices, unmasked_indices]
+        
+        # Conversione degli indici da tensori a liste se necessario per compatibilità
+        masked_indices_list = [masked_indices[b] for b in range(B)]
+        unmasked_indices_list = [unmasked_indices[b] for b in range(B)]
+        
+        return (patch_embeddings_with_mask, 
+                unmasked_patches_only, 
+                bool_mask, 
+                masked_indices_list, 
+                unmasked_indices_list)
+        # B, num_patches, patch_embedding_dim = patch_embeddings.shape
+        # total_patches_to_mask = int(self.masking_percentage * num_patches)
+        
+        # # Generazione della permutazione casuale per ogni batch
+        # perm = torch.rand(B, num_patches, device=patch_embeddings.device).argsort(dim=1)
+
+        # # Creazione della maschera binaria
+        # bool_mask = torch.zeros((B, num_patches), dtype=torch.bool, device=patch_embeddings.device)
+        # bool_mask[:, :total_patches_to_mask] = True
+        
+        # # Applicazione della permutazione alla maschera
+        # bool_mask = bool_mask.gather(dim=1, index=perm)
+        # bool_mask = bool_mask.unsqueeze(-1).expand(-1, -1, patch_embedding_dim)
+        
+        # # Preparazione del mask embedding
+        # encoder_mask = self.encoder_mask_emb.view(1, 1, -1).expand(B, -1, -1)
+
+        # # Patches complete con mask embedding applicato
+        # patch_embeddings_with_mask_embeddings = torch.where(bool_mask, encoder_mask, patch_embeddings)
+        
+        # # Estrazione degli indici mascherati e non mascherati
+        # masked_indices = []
+        # unmasked_indices = []
+
+        # for b in range(B):
+        #     masked_idx = torch.where(bool_mask[b, :, 0])[0] # prendo solo la prima colonna tanto sono tutte uguali (le patch sono per riga)
+        #     unmasked_idx = torch.where(~bool_mask[b, :, 0])[0]
+        #     masked_indices.append(masked_idx)
+        #     unmasked_indices.append(unmasked_idx)
+        
+        # # Estrazione delle patches non mascherate per l'encoder
+        # unmasked_patches_only = []
+        # for b in range(B):
+        #     unmasked_patches_only.append(patch_embeddings[b, unmasked_indices[b]])
+        # unmasked_patches_only = torch.stack(unmasked_patches_only)
        
-        return patch_embeddings_with_mask_embeddings, unmasked_patches_only, bool_mask, masked_indices, unmasked_indices
+        # return patch_embeddings_with_mask_embeddings, unmasked_patches_only, bool_mask, masked_indices, unmasked_indices
         
 def test():
     config = SimpleNamespace(
