@@ -192,18 +192,24 @@ class MAE(nn.Module):
             )    
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        device = x.device
         original_x = x.detach().clone()
-        print(f"x:\t\t\t{x.shape}")
+        # print(f"x:\t\t\t{x.shape}")
         x = self.batch_norm(x)
         patch_embedding = self.patch_embedding(x)
-        print(f"patch_embedding:\t{patch_embedding.shape}")
-        print(f"num_patches:\t{self.patch_embedding.num_patches}")
+        # print(f"patch_embedding:\t{patch_embedding.shape}")
+        # print(f"num_patches:\t{self.patch_embedding.num_patches}")
         
-        pos_embed_enc = SinusoidalPositionalEncoding(embed_dim=self.enc_embed_dim, height=int(self.img_size[0]/self.patch_size[0]), width=int(self.img_size[1]/self.patch_size[1]), cls_token=True) # [num_patches, embed_dim]
+        pos_embed_enc = SinusoidalPositionalEncoding(
+            embed_dim=self.enc_embed_dim, 
+            height=int(self.img_size[0]/self.patch_size[0]), 
+            width=int(self.img_size[1]/self.patch_size[1]), 
+            cls_token=True).to(device)  # [num_patches, embed_dim]
         pos_embed_enc = pos_embed_enc.expand(x.shape[0], -1, -1)
-        print(f"pos_embed_enc:\t\t{pos_embed_enc.shape}")
+        pos_embed_enc = pos_embed_enc.to(device)
+        # print(f"pos_embed_enc:\t\t{pos_embed_enc.shape}")
         patch_embedding_with_pe = patch_embedding + pos_embed_enc[:,1:,:] # in prima posiziono cls token
-        print(f"patch_embed_with_pe:\t{patch_embedding_with_pe.shape}")
+        # print(f"patch_embed_with_pe:\t{patch_embedding_with_pe.shape}")
         
         (
             patch_embeddings_with_mask_embeddings, 
@@ -215,63 +221,74 @@ class MAE(nn.Module):
 
         cls_token = self.cls_token_enc + pos_embed_enc[:, :1, :] # sommo positional encoding al cls token
         cls_tokens = cls_token.expand(unmasked_patches_only.shape[0], -1, -1)
-        print(f"cls_tokens:\t\t{cls_tokens.shape}")
+        # print(f"cls_tokens:\t\t{cls_tokens.shape}")
         enc_input = torch.cat((cls_tokens, unmasked_patches_only), dim=1)
-        print(f"enc_input:\t\t{enc_input.shape}")
+        # print(f"enc_input:\t\t{enc_input.shape}")
 
         unmasked_embeddings = self.encoder(enc_input) # il primo è relativo al CLS
-        print(f"unmasked_embeddings:\t{unmasked_embeddings.shape}")
+        # print(f"unmasked_embeddings:\t{unmasked_embeddings.shape}")
 
         if self.pretraining:
             unmasked_embeddings_projected = self.project_into_decoder_space(unmasked_embeddings)
             decoder_input = []
-
             for b in range(x.shape[0]):
-                x = torch.zeros((self.patch_embedding.num_patches, self.dec_embed_dim), device=unmasked_embeddings_projected[b].device)
+                batch_decoder_input = torch.zeros(
+                    (self.patch_embedding.num_patches, self.dec_embed_dim), 
+                    device=device
+                )
 
                 # Inserisci embeddings encoder nei punti non mascherati
-                x[unmasked_indices[b]] = unmasked_embeddings_projected[b, 1:, :] # ERRORE QUA
+                batch_decoder_input[unmasked_indices[b]] = unmasked_embeddings_projected[b, 1:, :]
 
-                # Inserisci decoder_mask_emb nei punti mascherati
-                x[masked_indices[b]] = self.decoder_mask_emb  # broadcast su più righe
+                mask_emb = self.decoder_mask_emb.unsqueeze(0).expand(len(masked_indices[b]), -1)
+                batch_decoder_input[masked_indices[b]] = mask_emb
 
-                decoder_input.append(x)
-            decoder_input = torch.stack(decoder_input)
+                decoder_input.append(batch_decoder_input)
             
-            pos_embed_dec = SinusoidalPositionalEncoding(embed_dim=self.dec_embed_dim, height=int(self.img_size[0]/self.patch_size[0]), width=int(self.img_size[1]/self.patch_size[1]), cls_token=True) # [num_patches, embed_dim]
+            decoder_input = torch.stack(decoder_input)
+            # for b in range(x.shape[0]):
+            #     x = torch.zeros((self.patch_embedding.num_patches, self.dec_embed_dim), device=unmasked_embeddings_projected[b].device)
+
+            #     # Inserisci embeddings encoder nei punti non mascherati
+            #     x[unmasked_indices[b]] = unmasked_embeddings_projected[b, 1:, :] 
+
+            #     # Inserisci decoder_mask_emb nei punti mascherati
+            #     x[masked_indices[b]] = self.decoder_mask_emb  # broadcast su più righe
+
+            #     decoder_input.append(x)
+            # decoder_input = torch.stack(decoder_input)
+            
+            pos_embed_dec = SinusoidalPositionalEncoding(
+                embed_dim=self.dec_embed_dim, 
+                height=int(self.img_size[0]/self.patch_size[0]), 
+                width=int(self.img_size[1]/self.patch_size[1]), 
+                cls_token=True).to(device) # [num_patches, embed_dim]
             pos_embed_dec = pos_embed_dec.expand(x.shape[0], -1, -1)
 
             cls_token = self.cls_token_dec + pos_embed_enc[:, :1, :] # sommo positional encoding al cls token
             cls_tokens = cls_token.expand(unmasked_patches_only.shape[0], -1, -1)
             
             decoder_input = torch.cat((cls_tokens, decoder_input), dim=1)
-            print(f"decoder_input:\t\t{decoder_input.shape}")
+            # print(f"decoder_input:\t\t{decoder_input.shape}")
 
             decoder_output = self.decoder(decoder_input)
             decoder_output = decoder_output[:, 1:, :]
             # decoder_output = decoder_output.unsqueeze(0).transpose(0,1) # B, num_patch, embed_dim --> B, 1, num_patch, embed_dim
-            print(f"decoder_output:\t\t{decoder_output.shape}")
+            # print(f"decoder_output:\t\t{decoder_output.shape}")
 
             recon_logits = self.final_proj_reconstruction(decoder_output)
             class_logits = self.final_proj_classification(decoder_output)
-            print(f"recon_logits:\t\t{recon_logits.shape}")
-            print(f"class_logits:\t\t{class_logits.shape}")
+            # print(f"recon_logits:\t\t{recon_logits.shape}")
+            # print(f"class_logits:\t\t{class_logits.shape}")
             
             target = patch_extract(original_x)
             return target, recon_logits, class_logits, bool_mask
             
         else:
-            self.classification_head = nn.Linear(
-                self.dec_embed_dim,
-                self.patch_size[0] * self.patch_size[1] * self.num_channels,
-                bias=True
-            )
-            unmasked_embeddings = self.mean_pooling(unmasked_embeddings)
+            unmasked_embeddings = self.mean_pooling(unmasked_embeddings[:,1:,:])
             class_logits = self.classification_head(unmasked_embeddings)
             
-            target = patch_extract(original_x)
-            
-            return decoder_output, class_logits, bool_mask
+            return unmasked_embeddings, class_logits
  
 # class PatchExtract(nn.Module):
 #     def __init__(self, patch_size=16):
@@ -294,12 +311,12 @@ class MAE(nn.Module):
 
 
 def run_mae_tests():
-    print("Avvio dei test per MAE...")
+    # print("Avvio dei test per MAE...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Utilizzo del dispositivo: {device}")
+    # print(f"Utilizzo del dispositivo: {device}")
 
     # --- Test per la Modalità Pre-training ---
-    print("\n## Test MAE in Modalità Pre-training ##")
+    # print("\n## Test MAE in Modalità Pre-training ##")
     config_pt = SimpleNamespace(
         num_channels = 1,
         patch_embedding_dropout = 0.1,
@@ -362,17 +379,17 @@ def run_mae_tests():
     with torch.no_grad():
         decoder_output, recon_logits, class_logits = mae_pt_model(dummy_images)
 
-    print("Forward Pass in Modalità Pre-training Riuscito!")
-    print(f"  Shape input image: {dummy_images.shape}")
-    print(f"  Shape output decoder: {decoder_output.shape}")
-    print(f"  Shape logits ricostruzione: {recon_logits.shape}")
-    print(f"  Shape logits classificazione (pretrain): {class_logits.shape}")
+    # print("Forward Pass in Modalità Pre-training Riuscito!")
+    # print(f"  Shape input image: {dummy_images.shape}")
+    # print(f"  Shape output decoder: {decoder_output.shape}")
+    # print(f"  Shape logits ricostruzione: {recon_logits.shape}")
+    # print(f"  Shape logits classificazione (pretrain): {class_logits.shape}")
 
     target = patch_extract(dummy_images)
-    print(f"target:\t\t{target.shape}")
+    # print(f"target:\t\t{target.shape}")
 
     # --- Test per la Modalità Fine-tuning ---
-    # print("\n## Test MAE in Modalità Fine-tuning ##")
+    # # print("\n## Test MAE in Modalità Fine-tuning ##")
     # config_ft = SimpleNamespace(
     #     img_size=(32, 32), patch_size=(8, 8), num_channels=3,
     #     enc_embed_dim=64, dec_embed_dim=32, # dec_embed_dim non usato dalla head di fine-tuning corretta
@@ -389,10 +406,10 @@ def run_mae_tests():
     #     with torch.no_grad():
     #         cls_features, class_logits_ft = mae_ft_model(dummy_images_ft)
         
-    #     print("Forward Pass in Modalità Fine-tuning Riuscito!")
-    #     print(f"  Shape input image: {dummy_images_ft.shape}")
-    #     print(f"  Shape features CLS: {cls_features.shape}")
-    #     print(f"  Shape logits classificazione (finetune): {class_logits_ft.shape}")
+    #     # print("Forward Pass in Modalità Fine-tuning Riuscito!")
+    #     # print(f"  Shape input image: {dummy_images_ft.shape}")
+    #     # print(f"  Shape features CLS: {cls_features.shape}")
+    #     # print(f"  Shape logits classificazione (finetune): {class_logits_ft.shape}")
 
     #     expected_cls_features_shape = (B, config_ft.enc_embed_dim)
     #     expected_class_logits_ft_shape = (B, config_ft.num_classes)
@@ -401,11 +418,11 @@ def run_mae_tests():
     #         f"Errore shape features CLS: {cls_features.shape}, Atteso {expected_cls_features_shape}"
     #     assert class_logits_ft.shape == expected_class_logits_ft_shape, \
     #         f"Errore shape logits classificazione (finetune): {class_logits_ft.shape}, Atteso {expected_class_logits_ft_shape}"
-    #     print("Verifiche Shape Modalità Fine-tuning Superate!")
+    #     # print("Verifiche Shape Modalità Fine-tuning Superate!")
 
     # except Exception as e:
-    #     print(f"Errore durante il test MAE fine-tuning: {e}")
-    #     traceback.print_exc()
+    #     # print(f"Errore durante il test MAE fine-tuning: {e}")
+    #     traceback.# print_exc()
 
 if __name__ == "__main__":
     run_mae_tests()
