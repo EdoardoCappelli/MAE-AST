@@ -223,6 +223,8 @@ def main():
         checkpoints_dir = "./checkpoints_mae_mnist"
     )
 
+    print(config)
+
     # Crea cartella checkpoint se non esiste
     os.makedirs(config.checkpoints_dir, exist_ok=True)
 
@@ -269,7 +271,7 @@ def main():
             'optimizer': optimizer.state_dict()
         }
         
-        filename = os.path.join(config.checkpoints_dir, f"checkpoint_epoch_{epoch+1}.pth")
+        filename = os.path.join(config.checkpoints_dir, f"checkpoint_last_epoch.pth")
         torch.save(state, filename)
         if is_best:
             shutil.copyfile(filename, os.path.join(config.checkpoints_dir, "model_best.pth"))
