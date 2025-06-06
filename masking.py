@@ -90,154 +90,6 @@ class Mask(nn.Module):
        
         # return patch_embeddings_with_mask_embeddings, unmasked_patches_only, bool_mask, masked_indices, unmasked_indices
         
-def test():
-    config = SimpleNamespace(
-        masking_percentage=0.75,    
-        masking_strategy="random",   
-        enc_embed_dim=4,           
-        patch_size=(2, 2),
-    )
-
-    B = 2
-    num_patches = 4  # 448
-    n_mel_bins = 4
-    spect_width = 4
-
-    patch_embedding = nn.Unfold(
-        kernel_size=config.patch_size,
-        stride=config.patch_size,
-    )
-
-    num_patches = (n_mel_bins // config.patch_size[0]) ** 2 
-
-    spectrogram1 = torch.arange(
-        start=0,
-        end=n_mel_bins * spect_width,
-        dtype=torch.float32
-    ).view(1, n_mel_bins, spect_width)  
-    
-    spectrogram2 = torch.arange(
-        start=n_mel_bins * spect_width,
-        end=n_mel_bins * spect_width * 2,
-        dtype=torch.float32
-    ).view(1, n_mel_bins, spect_width)  
-    
-    spectrogram = torch.stack([spectrogram1, spectrogram2])
-    print(spectrogram.shape)
-    print(f"spectrogram:\n{spectrogram}")
-   
-    patch_embeddings = patch_embedding(spectrogram)
-    # patch_embeddings = torch.randn(B, num_patches, config.enc_embed_dim)
-    print(f"patch_embeddings:\n{patch_embeddings}")
-    patch_embeddings = patch_embeddings.transpose(-1,-2) # ogni riga rappresenta una patch
-    print(f"patch_embeddings transposed:\n{patch_embeddings}")
-
-    print(f"first patch patch_embeddings[b, riga, colonna] (batch=0):\n{patch_embeddings[0, 0, :]}")
-
-    masker = Mask(config)
-    
-    (
-        patch_embeddings_with_mask_embeddings, 
-        unmasked_patches_only, 
-        bool_mask,
-        masked_indices, 
-        unmasked_indices 
-    ) = masker(patch_embeddings)
-
-    # Stampa risultati
-    print("=== Shape dei tensori in output ===")
-    print(f"patch_embeddings_with_mask_embeddings:\n{patch_embeddings_with_mask_embeddings}  "
-        f"(atteso: ({B}, {num_patches}, {config.enc_embed_dim}))")
-    print(f"unmasked_patches:\n{unmasked_patches_only}  "
-        f"(atteso: ({B}, {num_patches - int(config.masking_percentage * num_patches)}, {config.enc_embed_dim}))")
-    print(f"bool_mask:\n{bool_mask.shape}  (atteso: ({B}, {num_patches}))")
-    print()
-
-    # 7. Controlliamo quante patch sono effettivamente mascherate in ciascun batch
-    unmasked = 0
-    for b in range(B):
-        num_masked = bool_mask[b,:,0].sum().item()
-        num_unmasked = (~bool_mask[b,:,0]).sum().item()
-        unmasked = num_unmasked
-        print(f"Batch {b}: mascherate = {num_masked}, non mascherate = {num_unmasked}")
-
-    print()
-
-    # 8. Stampiamo gli indici estratti per il primo batch per verifica
-    print("Esempio indici Batch 0:")
-    print("  masked_indices[0]:   ", masked_indices[0].tolist())
-    print("  unmasked_indices[0]: ", unmasked_indices[0].tolist())
-    print()
-
-    print("Test positional encoding")
-    pe1 = torch.arange(
-        start=0,
-        end=n_mel_bins * spect_width,
-        dtype=torch.float32
-    ).view(num_patches, config.enc_embed_dim)  
-    
-    pe2 = torch.arange(
-        start=n_mel_bins * spect_width,
-        end=n_mel_bins * spect_width * 2,
-        dtype=torch.float32
-    ).view(num_patches, config.enc_embed_dim)  
-    
-    pe = torch.stack([pe1, pe2])
-
-    print(f"pe:\n{pe}")
-
-    pe_for_unmasked_pathes_only = []
-    pe_unmasked_indices = []
-
-    for b in range(B):
-        # Indici delle righe non mascherate per il batch b
-        pe_unmasked_idx = torch.where(~bool_mask[b,:,0])[0]  
-        pe_unmasked_indices.append(pe_unmasked_idx)
-
-        # Estrai tutte le righe corrispondenti da pe[b, 0, :, :]
-        selected_rows = pe[b, pe_unmasked_idx, :]  # shape: [num_unmasked, W]
-        pe_for_unmasked_pathes_only.append(selected_rows)
-
-    pe_for_unmasked_pathes_only = torch.stack(pe_for_unmasked_pathes_only)
-    print(f"pe_for_unmasked_pathes_only:\n{pe_for_unmasked_pathes_only}")
-
-    unmasked_patches_only_with_pe = pe_for_unmasked_pathes_only + unmasked_patches_only
-    print(f"unmasked_patches_only_with_pe:\n{unmasked_patches_only_with_pe}")
-    
-    encoder_output1 = torch.arange(
-        start=0,
-        end=unmasked * config.enc_embed_dim,
-        dtype=torch.float32
-    ).view(unmasked, config.enc_embed_dim)  
-    
-    encoder_output2 = torch.arange(
-        start=unmasked * config.enc_embed_dim,
-        end=unmasked * config.enc_embed_dim * 2,
-        dtype=torch.float32
-    ).view(unmasked, config.enc_embed_dim)  
-
-    encoder_output = torch.stack([encoder_output1, encoder_output2])
-    print(f"encoder_output:\n{encoder_output}")
-
-    decoder_mask_emb = nn.Parameter(torch.FloatTensor(config.enc_embed_dim).uniform_()) # è l'embedding che rappresenta la patch mascherata e dovrebbe essere appresa durante il training
-
-    x_full = []
-
-    for b in range(B):
-        x = torch.zeros((num_patches, config.enc_embed_dim), device=encoder_output[b].device)
-
-        # Inserisci embeddings encoder nei punti non mascherati
-        x[unmasked_indices[b]] = encoder_output[b]
-
-        # Inserisci decoder_mask_emb nei punti mascherati
-        x[masked_indices[b]] = decoder_mask_emb  # broadcast su più righe
-
-        x_full.append(x)
-
-    print(f"x_full:\n{x_full}")
-
-if __name__ == "__main__":
-    test()
 
 
 '''
@@ -352,3 +204,294 @@ Esempio indici Batch 0:
   unmasked_indices[0]:  [2]
 
 '''
+
+
+import torch
+import torch.nn as nn
+from config import Config
+
+class Mask(nn.Module):
+    def __init__(self, config: Config):
+        super().__init__()
+        self.config = config
+        self.masking_percentage = config.masking_percentage
+        self.masking_strategy = config.masking_strategy  # For future extensions
+        
+        # No encoder_mask_emb needed - masking means complete removal in MAE
+
+    def forward(self, patch_embeddings: torch.Tensor) -> tuple:
+        """
+        Apply random masking to patch embeddings.
+        
+        Args:
+            patch_embeddings: (B, num_patches, embed_dim) - patches with positional encoding
+            
+        Returns:
+            tuple containing:
+            - unmasked_patches_only: (B, num_unmasked, embed_dim) - only unmasked patches for encoder
+            - bool_mask: (B, num_patches) - True for masked patches
+            - masked_indices_list: list of masked indices per batch
+            - unmasked_indices_list: list of unmasked indices per batch
+        """
+        B, num_patches, embed_dim = patch_embeddings.shape
+        device = patch_embeddings.device
+        
+        # Calculate number of patches to mask
+        num_masked = int(self.masking_percentage * num_patches)
+        num_unmasked = num_patches - num_masked
+        
+        # Generate random permutation for each batch
+        if self.masking_strategy == "random":
+            # Random masking (default MAE strategy)
+            perm = torch.rand(B, num_patches, device=device).argsort(dim=1)
+        else:
+            # Could add other strategies here (block masking, etc.)
+            perm = torch.rand(B, num_patches, device=device).argsort(dim=1)
+        
+        # Split indices into masked and unmasked
+        masked_indices = perm[:, :num_masked]  # (B, num_masked)
+        unmasked_indices = perm[:, num_masked:]  # (B, num_unmasked)
+        
+        # Create boolean mask (True = masked, False = unmasked)
+        bool_mask = torch.zeros((B, num_patches), dtype=torch.bool, device=device)
+        bool_mask.scatter_(dim=1, index=masked_indices, value=True)
+        
+        # Extract only unmasked patches for the encoder
+        # This is the key insight of MAE: encoder only sees unmasked patches
+        batch_indices = torch.arange(B, device=device).unsqueeze(1)  # (B, 1)
+        unmasked_patches_only = patch_embeddings[batch_indices, unmasked_indices]  # (B, num_unmasked, embed_dim)
+        
+        # Convert to lists for easier handling in decoder reconstruction
+        masked_indices_list = [masked_indices[b] for b in range(B)]
+        unmasked_indices_list = [unmasked_indices[b] for b in range(B)]
+        
+        return (
+            unmasked_patches_only,      # Only this goes to encoder
+            bool_mask,                  # For loss computation
+            masked_indices_list,        # For decoder reconstruction
+            unmasked_indices_list       # For decoder reconstruction
+        )
+    
+    def get_mask_ratio(self) -> float:
+        """Return the masking ratio for logging/debugging."""
+        return self.masking_percentage
+    
+    def set_mask_ratio(self, ratio: float):
+        """Dynamically adjust masking ratio if needed."""
+        assert 0.0 <= ratio <= 1.0, "Masking ratio must be between 0 and 1"
+        self.masking_percentage = ratio
+
+def test_masker():
+    """Comprehensive test of the MAE Masker"""
+    
+    print("=" * 80)
+    print("MAE MASKER TEST")
+    print("=" * 80)
+    
+    # Create test configuration
+    config = SimpleNamespace(
+        masking_percentage=0.75,    # Mask 75% of patches
+        masking_strategy="random",   
+        enc_embed_dim=4,            # Small embedding dimension for easy visualization
+        patch_size=(2, 2),
+        img_size=(4, 4)
+    )
+    
+    # Test parameters
+    batch_size = 2
+    num_patches = 4  # For a 4x4 image with 2x2 patches = 4 patches total
+    embed_dim = config.enc_embed_dim
+    
+    print(f"Configuration:")
+    print(f"  - Batch size: {batch_size}")
+    print(f"  - Number of patches: {num_patches}")
+    print(f"  - Embedding dimension: {embed_dim}")
+    print(f"  - Masking percentage: {config.masking_percentage * 100}%")
+    print(f"  - Expected masked patches per image: {int(config.masking_percentage * num_patches)}")
+    print(f"  - Expected unmasked patches per image: {num_patches - int(config.masking_percentage * num_patches)}")
+    print()
+    
+    # Create masker
+    masker = Mask(config)
+    
+    # Create dummy patch embeddings with identifiable values
+    # Each patch will have unique values so we can track them
+    patch_embeddings = torch.zeros(batch_size, num_patches, embed_dim)
+    
+    # Fill with identifiable patterns
+    for b in range(batch_size):
+        for p in range(num_patches):
+            # Each patch gets values like [batch_id, patch_id, batch_id, patch_id]
+            patch_embeddings[b, p, :] = torch.tensor([b*10 + p + 1] * embed_dim, dtype=torch.float32)
+    
+    print("INPUT PATCH EMBEDDINGS:")
+    print(f"Shape: {patch_embeddings.shape}")
+    for b in range(batch_size):
+        print(f"Batch {b}:")
+        for p in range(num_patches):
+            print(f"  Patch {p}: {patch_embeddings[b, p].tolist()}")
+    print()
+    
+    # Apply masking
+    torch.manual_seed(42)  # For reproducible results
+    outputs = masker(patch_embeddings)
+    
+    unmasked_patches_only, bool_mask, masked_indices_list, unmasked_indices_list = outputs
+    
+    print("MASKING RESULTS:")
+    print("=" * 50)
+    
+    # 1. Boolean mask
+    print("1. BOOLEAN MASK:")
+    print(f"   Shape: {bool_mask.shape}")
+    print(f"   Values:")
+    for b in range(batch_size):
+        mask_str = str(bool_mask[b].tolist()).replace('True', 'T').replace('False', 'F')
+        print(f"   Batch {b}: {mask_str}")
+        print(f"             {''.join(['M' if x else 'V' for x in bool_mask[b].tolist()])} (M=Masked, V=Visible)")
+    print()
+    
+    # 2. Masked indices
+    print("2. MASKED INDICES:")
+    for b in range(batch_size):
+        print(f"   Batch {b}: {masked_indices_list[b].tolist()}")
+    print()
+    
+    # 3. Unmasked indices  
+    print("3. UNMASKED INDICES:")
+    for b in range(batch_size):
+        print(f"   Batch {b}: {unmasked_indices_list[b].tolist()}")
+    print()
+    
+    # 4. Unmasked patches only
+    print("4. UNMASKED PATCHES ONLY (Input to Encoder):")
+    print(f"   Shape: {unmasked_patches_only.shape}")
+    for b in range(batch_size):
+        print(f"   Batch {b}:")
+        for i, patch in enumerate(unmasked_patches_only[b]):
+            original_patch_idx = unmasked_indices_list[b][i].item()
+            print(f"     Unmasked patch {i} (original patch {original_patch_idx}): {patch.tolist()}")
+    print()
+    
+    # 5. Verification - check that masking is consistent
+    print("5. VERIFICATION:")
+    print("   Checking consistency between outputs...")
+    
+    all_consistent = True
+    for b in range(batch_size):
+        # Check that bool_mask matches indices
+        expected_mask = torch.zeros(num_patches, dtype=torch.bool)
+        expected_mask[masked_indices_list[b]] = True
+        
+        if not torch.equal(bool_mask[b], expected_mask):
+            print(f"   ❌ Batch {b}: bool_mask doesn't match masked_indices")
+            all_consistent = False
+        
+        # Check that unmasked patches match original
+        for i, unmasked_idx in enumerate(unmasked_indices_list[b]):
+            original_patch = patch_embeddings[b, unmasked_idx]
+            extracted_patch = unmasked_patches_only[b, i]
+            if not torch.equal(original_patch, extracted_patch):
+                print(f"   ❌ Batch {b}: Unmasked patch {i} doesn't match original patch {unmasked_idx}")
+                all_consistent = False
+        
+        # Check counts
+        expected_masked = int(config.masking_percentage * num_patches)
+        actual_masked = len(masked_indices_list[b])
+        actual_unmasked = len(unmasked_indices_list[b])
+        
+        if actual_masked != expected_masked:
+            print(f"   ❌ Batch {b}: Expected {expected_masked} masked patches, got {actual_masked}")
+            all_consistent = False
+            
+        if actual_masked + actual_unmasked != num_patches:
+            print(f"   ❌ Batch {b}: Masked + unmasked ({actual_masked} + {actual_unmasked}) != total patches ({num_patches})")
+            all_consistent = False
+    
+    if all_consistent:
+        print("   ✅ All consistency checks passed!")
+    print()
+    
+    # 6. Statistics
+    print("6. STATISTICS:")
+    total_patches = batch_size * num_patches
+    total_masked = bool_mask.sum().item()
+    total_unmasked = total_patches - total_masked
+    
+    print(f"   Total patches across all batches: {total_patches}")
+    print(f"   Total masked patches: {total_masked}")
+    print(f"   Total unmasked patches: {total_unmasked}")
+    print(f"   Actual masking ratio: {total_masked / total_patches:.2%}")
+    print(f"   Expected masking ratio: {config.masking_percentage:.2%}")
+    print()
+    
+    # 7. Visual representation
+    print("7. VISUAL REPRESENTATION:")
+    print("   Original patches layout (2x2 grid for each batch):")
+    
+    for b in range(batch_size):
+        print(f"   Batch {b}:")
+        mask = bool_mask[b]
+        # Assuming 2x2 grid of patches
+        grid = [
+            [f"P0{'(M)' if mask[0] else '(V)'}", f"P1{'(M)' if mask[1] else '(V)'}"],
+            [f"P2{'(M)' if mask[2] else '(V)'}", f"P3{'(M)' if mask[3] else '(V)'}"]
+        ]
+        for row in grid:
+            print(f"     {row[0]:8} {row[1]:8}")
+        print()
+
+
+def test_different_scenarios():
+    """Test masker with different configurations"""
+    
+    print("=" * 80)
+    print("TESTING DIFFERENT MASKING RATIOS")
+    print("=" * 80)
+    
+    # Test different masking ratios
+    ratios = [0.25, 0.5, 0.75, 0.9]
+    
+    for ratio in ratios:
+        print(f"\nTesting masking ratio: {ratio:.0%}")
+        print("-" * 40)
+        
+        config = SimpleNamespace(
+            masking_percentage=ratio,
+            masking_strategy="random",
+            enc_embed_dim=2
+        )
+        
+        masker = Mask(config)
+        
+        # Small test case
+        batch_size = 1
+        num_patches = 8
+        embed_dim = 2
+        
+        patch_embeddings = torch.randn(batch_size, num_patches, embed_dim)
+        
+        torch.manual_seed(123)  # For consistent results
+        outputs = masker(patch_embeddings)
+        unmasked_patches_only, bool_mask, masked_indices_list, unmasked_indices_list = outputs
+        
+        num_masked = len(masked_indices_list[0])
+        num_unmasked = len(unmasked_indices_list[0])
+        actual_ratio = num_masked / num_patches
+        
+        print(f"Expected masked: {int(ratio * num_patches)}, Actual: {num_masked}")
+        print(f"Expected unmasked: {num_patches - int(ratio * num_patches)}, Actual: {num_unmasked}")
+        print(f"Actual ratio: {actual_ratio:.2%}")
+        print(f"Mask pattern: {['M' if x else 'V' for x in bool_mask[0].tolist()]}")
+
+
+if __name__ == "__main__":
+    # Run comprehensive test
+    test_masker()
+    
+    # Run additional scenario tests
+    test_different_scenarios()
+    
+    print("\n" + "=" * 80)
+    print("ALL TESTS COMPLETED")
+    print("=" * 80)
