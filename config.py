@@ -144,8 +144,9 @@ class Config:
             # Dataset 
             audio_length_seconds = 5,  
             librispeech_root = "./data/",
-            librispeech_subset = 'clean-100-small',  # 'clean-100', 'clean-360', 'other-500'
-            
+            librispeech_subset = 'clean-100',  # 'clean-100', 'clean-360', 'other-500'
+            download_librispeech = True,
+
             # WandB
             use_wandb = True,
             wandb_project = "mae-librispeech-pretraining",
@@ -206,7 +207,8 @@ class Config:
         self.audio_length_seconds = audio_length_seconds   
         self.librispeech_root = librispeech_root
         self.librispeech_subset = librispeech_subset
-        
+        self.download_librispeech = download_librispeech
+
         # WandB
         self.use_wandb = use_wandb
         self.wandb_project = wandb_project

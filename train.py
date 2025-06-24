@@ -23,7 +23,7 @@ def data_loader_librispeech(root, batch_size=32, workers=4, pin_memory=True, sam
         root=root,
         train=True,
         download=True, 
-        subset='clean-100-small'  # Usa train-clean-100
+        subset='clean-100'  # Usa train-clean-100
     )
 
     if sample_size is not None:
@@ -417,7 +417,7 @@ def main():
         run_name += f'-{wandb.run.id}'
         
         wandb.run.name = run_name
-        wandb.run.save()
+        # wandb.run.save()
 
         wandb.watch(model, log='gradients', log_freq=config.print_freq * 5)
     else:
@@ -433,8 +433,8 @@ def main():
         train_dataset_spec = LibriSpeech(
             root=config.librispeech_root,
             train=True,
-            download=False,  # Già scaricato
-            subset='clean-100-small',
+            download=config.download_librispeech,  # Già scaricato
+            subset=config.librispeech_subset,
             transform=spectrogram_transform
         )
         
