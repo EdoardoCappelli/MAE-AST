@@ -68,3 +68,11 @@ def SinusoidalPositionalEncoding(embed_dim: int, height: int, width: int, cls_to
         return final_pe.unsqueeze(0)
     else:
         return pe_sequence.unsqueeze(0)
+    
+def simple_1d_pe(embed_dim: int, seq_len: int):
+    position = torch.arange(seq_len).unsqueeze(1).float()
+    div_term = torch.exp(torch.arange(0, embed_dim, 2).float() * (-math.log(10000.0) / embed_dim))
+    pe = torch.zeros(seq_len, embed_dim)
+    pe[:, 0::2] = torch.sin(position * div_term)
+    pe[:, 1::2] = torch.cos(position * div_term)
+    return pe.unsqueeze(0)  # Add batch dimension

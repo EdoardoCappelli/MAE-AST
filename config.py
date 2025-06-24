@@ -99,7 +99,7 @@ class Config:
             n_mel_bins = 128, # numero di bins del mel spectrogram (asse y)
             num_channels = 1,
             patch_embedding_dropout = 0.1,
-            img_size =  (16*5, 16*3),
+            img_size =  (128, 1024),
                 
             # Masking 
             masking_strategy = "random", # tipo di mascheramento
@@ -124,17 +124,33 @@ class Config:
             dec_mlp_ratio = 4,
 
             # Training
+            dataset_name = "LibriSpeech", 
+            use_validation = False,      
+            learnable_pos_emb = True,
             batch_size = 32,
             initial_lr = 0.0001,
             lambda_recon = 10,
             epochs = 50,
             weight_decay = 0.05,
             sample_size = 4000,
+            print_freq = 50,
             dataset_dir = "D:/data/spectrograms/balanced_train_segments",
             checkpoints_dir = "D:/checkpoints",
             npy_dir = "MAE-AST/spectrograms/balanced_train_segments",
             tensor_dir = "MAE-AST/tensors/balanced_train_segments",
+            resume = None,   # Path to a specific checkpoint to resume training
+            resume_epoch = 2,  # Resume training from a specific epoch number  
 
+            # Dataset 
+            audio_length_seconds = 5,  
+            librispeech_root = "./data/",
+            librispeech_subset = 'clean-100-small',  # 'clean-100', 'clean-360', 'other-500'
+            
+            # WandB
+            use_wandb = True,
+            wandb_project = "mae-librispeech-pretraining",
+            wandb_entity = "edoardocappelli1999",  
+            save_artifacts = True, # Salva i modelli migliori come artefatti
             **kwargs
     ):
         super().__init__()
@@ -169,6 +185,10 @@ class Config:
         self.dec_mlp_ratio = dec_mlp_ratio
 
         # Training
+        self.dataset_name = dataset_name
+        self.use_validation = use_validation   
+        self.learnable_pos_emb = learnable_pos_emb
+        self.print_freq = print_freq
         self.batch_size = batch_size
         self.initial_lr = initial_lr
         self.lambda_recon = lambda_recon
@@ -179,3 +199,16 @@ class Config:
         self.npy_dir = npy_dir
         self.tensor_dir = tensor_dir
         self.sample_size = sample_size
+        self.resume = resume
+        self.resume_epoch = resume_epoch  # Specific epoch to resume training from
+
+        # Dataset
+        self.audio_length_seconds = audio_length_seconds   
+        self.librispeech_root = librispeech_root
+        self.librispeech_subset = librispeech_subset
+        
+        # WandB
+        self.use_wandb = use_wandb
+        self.wandb_project = wandb_project
+        self.wandb_entity = wandb_entity    
+        self.save_artifacts = save_artifacts

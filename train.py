@@ -1,19 +1,18 @@
-import os
 import time
 import torch
-import torch.optim as optim
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
-from audioset import LibriSpeech, collate_fn_spectrogram, collate_fn_crop, AudioToSpectrogram
+from librispeech import LibriSpeech, collate_fn_spectrogram, collate_fn_crop, AudioToSpectrogram
 from mae import MAE
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import Subset
 import random
-from types import SimpleNamespace
-import torch.nn.functional as F 
 from losses import infoNCE_loss, mae_loss
 from colorama import Fore, Style, init
-
-DATASET_NAME = "AudioSet"
+import matplotlib.pyplot as plt
+from torch.optim import lr_scheduler
+import os 
+import wandb
+from config import Config 
+import glob
+import argparse
 
 # --------------------------------------------------
 # DATA LOADER
@@ -23,8 +22,8 @@ def data_loader_librispeech(root, batch_size=32, workers=4, pin_memory=True, sam
     train_dataset = LibriSpeech(
         root=root,
         train=True,
-        download=True,
-        subset='clean-100'  # Usa train-clean-100
+        download=True, 
+        subset='clean-100-small'  # Usa train-clean-100
     )
 
     if sample_size is not None:
@@ -39,10 +38,70 @@ def data_loader_librispeech(root, batch_size=32, workers=4, pin_memory=True, sam
         shuffle=True,
         num_workers=workers,
         pin_memory=pin_memory,
-        collate_fn=lambda batch: collate_fn_crop(batch, max_length=80000*3)  # 5*3 secondi
+        collate_fn=lambda batch: collate_fn_crop(batch, max_length=80000*2)  # 5*2 secondi
     )
     
     return train_loader_crop
+
+# --------------------------------------------------
+# CHECKPOINT UTILITIES
+# --------------------------------------------------
+
+def find_checkpoint_by_epoch(checkpoint_dir, epoch):
+    """Trova un checkpoint specifico per epoca"""
+    checkpoint_path = os.path.join(checkpoint_dir, f"checkpoint_epoch_{epoch}.pth")
+    if os.path.exists(checkpoint_path):
+        return checkpoint_path
+    return None
+
+def load_checkpoint(checkpoint_path, model, optimizer, scheduler=None, device='cuda'):
+    """Carica un checkpoint e restituisce le informazioni necessarie per riprendere il training"""
+    if not os.path.exists(checkpoint_path):
+        print(f"{Fore.RED}Checkpoint non trovato: {checkpoint_path}{Style.RESET_ALL}")
+        return None
+    
+    print(f"{Fore.CYAN}Caricamento checkpoint: {checkpoint_path}{Style.RESET_ALL}")
+    
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        
+        # Carica lo stato del modello
+        model.load_state_dict(checkpoint['model_state_dict'])
+        
+        # Carica lo stato dell'ottimizzatore
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        
+        # Carica lo stato dello scheduler se presente
+        if scheduler is not None and 'scheduler_state_dict' in checkpoint:
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        
+        # Estrai le informazioni del checkpoint
+        start_epoch = checkpoint.get('epoch', 0)
+        best_loss = checkpoint.get('best_loss', float('inf'))
+        total_iterations = checkpoint.get('total_iterations', 0)
+        
+        print(f"{Fore.GREEN}Checkpoint caricato con successo!{Style.RESET_ALL}")
+        print(f"  Epoca: {start_epoch}")
+        print(f"  Best Loss: {best_loss:.6f}")
+        print(f"  Total Iterations: {total_iterations}")
+        
+        return {
+            'start_epoch': start_epoch,
+            'best_loss': best_loss,
+            'total_iterations': total_iterations
+        }
+        
+    except Exception as e:
+        print(f"{Fore.RED}Errore nel caricamento del checkpoint: {str(e)}{Style.RESET_ALL}")
+        return None
+
+def print_resume_info(resume_from_epoch, checkpoint_dir):
+    """Stampa informazioni sul resume"""
+    print(f"\n{Fore.YELLOW}{'='*60}{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}RESUME TRAINING{Style.RESET_ALL}")
+    print(f"Riprendendo il training dall'epoca: {Fore.GREEN}{resume_from_epoch}{Style.RESET_ALL}")
+    print(f"Directory checkpoint: {checkpoint_dir}")
+    print(f"{Fore.YELLOW}{'='*60}{Style.RESET_ALL}")
 
 # --------------------------------------------------
 # AVERAGE METER (per tempi e loss)
@@ -77,13 +136,18 @@ def format_time(seconds):
     else:
         return f"{int(seconds//3600)}h {int((seconds%3600)//60)}m"
 
-def print_header(dataset_name="LibriSpeech", use_validation=True):
+def print_header(dataset_name="LibriSpeech", use_validation=True, device='cpu', resume_info=None):
     print("\n" + "="*80)
-    print(f"{Fore.CYAN}{'MAE Training on ' + dataset_name:^80}{Style.RESET_ALL}")
+    header_text = f'MAE Training on {dataset_name} using {device}'
+    print(f"{Fore.CYAN}{header_text:^80}{Style.RESET_ALL}")
     if use_validation:
         print(f"{Fore.GREEN}{'Mode: Training + Validation':^80}{Style.RESET_ALL}")
     else:
         print(f"{Fore.YELLOW}{'Mode: Training Only':^80}{Style.RESET_ALL}")
+    
+    if resume_info:
+        print(f"{Fore.MAGENTA}{'RESUMING from Epoch ' + str(resume_info['start_epoch']):^80}{Style.RESET_ALL}")
+    
     print("="*80)
 
 def print_epoch_header(epoch, total_epochs, lr):
@@ -91,14 +155,7 @@ def print_epoch_header(epoch, total_epochs, lr):
     print(f"\n{Fore.YELLOW}┌─ Epoch {epoch+1:3d}/{total_epochs} ")
     print(f"{Fore.YELLOW}│{Style.RESET_ALL} Learning Rate: {Fore.GREEN}{lr:.2e}{Style.RESET_ALL}")
 
-def adjust_learning_rate(optimizer, epoch, init_lr):
-    """Decade il learning rate di 0.8 ogni 15 epoche."""
-    lr = init_lr * (0.8 ** (epoch // 15))
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
-    return lr
-
-def train(train_loader, model, optimizer, epoch, total_epochs, print_freq=100, device='cuda', pretraining=True):
+def train(train_loader, model, optimizer, epoch, total_epochs, print_freq=100, device='cuda', pretraining=True, use_wandb=False):
     """Loop di training professionale per un epoch"""
     batch_time = AverageMeter() # batch_time - data_time alto → Riduci model size, aumenta batch size
     data_time = AverageMeter() # data_time alto → Aumenta num_workers, usa SSD, ottimizza dataset
@@ -121,9 +178,9 @@ def train(train_loader, model, optimizer, epoch, total_epochs, print_freq=100, d
         # Forward pass
         if pretraining:
             target, recon_logits, class_logits, bool_mask = model(input)
-            recon_loss = mae_loss(target, recon_logits)
-            class_loss = infoNCE_loss(target, class_logits)
-            loss = recon_loss * 1 + class_loss * 1
+            recon_loss = mae_loss(target, recon_logits) * 10
+            class_loss = infoNCE_loss(target, class_logits) * 1
+            loss = recon_loss + class_loss 
             
             # Update meters
             recon_losses.update(recon_loss.item(), input.size(0))
@@ -160,6 +217,17 @@ def train(train_loader, model, optimizer, epoch, total_epochs, print_freq=100, d
                   f"│ Class: {Fore.MAGENTA}{class_losses.val:.4f}{Style.RESET_ALL} "
                   f"│ Time: {batch_time.val:.3f}s "
                   f"│ ETA: {format_time(eta_seconds)}")
+            
+            step = epoch * total_batches + i
+            if use_wandb:
+                wandb.log({
+                    "train/step_loss": losses.val,
+                    "train/step_recon_loss": recon_losses.val,
+                    "train/step_class_loss": class_losses.val,
+                    "learning_rate": optimizer.param_groups[0]['lr'],
+                    "step": step,
+                    "epoch": epoch + 1
+                })
 
     # Final epoch summary
     print(f"{Fore.YELLOW}│{Style.RESET_ALL} {'─'*70}")
@@ -171,7 +239,7 @@ def train(train_loader, model, optimizer, epoch, total_epochs, print_freq=100, d
           f"Time: {format_time(batch_time.sum)}")
     print(f"{Fore.YELLOW}└─{Style.RESET_ALL}")
     
-    return losses.avg
+    return losses.avg, recon_losses.avg, class_losses.avg
 
 def validate(val_loader, model, epoch, print_freq=100, device='cuda', pretraining=True):
     """Loop di validazione professionale"""
@@ -193,9 +261,9 @@ def validate(val_loader, model, epoch, print_freq=100, device='cuda', pretrainin
             # Forward pass
             if pretraining:
                 target, recon_logits, class_logits, bool_mask = model(input)
-                recon_loss = mae_loss(target, recon_logits)
-                class_loss = infoNCE_loss(target, class_logits)
-                loss = recon_loss * 1 + class_loss * 1
+                recon_loss = mae_loss(target, recon_logits) * 10
+                class_loss = infoNCE_loss(target, class_logits) * 1
+                loss = recon_loss + class_loss 
                 
                 # Update meters
                 recon_losses.update(recon_loss.item(), input.size(0))
@@ -220,26 +288,33 @@ def validate(val_loader, model, epoch, print_freq=100, device='cuda', pretrainin
     print(f"    Avg Time:     {batch_time.avg:.3f}s/batch")
     print("─" * 50)
     
-    return losses.avg
+    return losses.avg, recon_losses.avg, class_losses.avg
 
-def save_checkpoint(state, filename='checkpoint.pth.tar', is_best=False):
-    """Salva checkpoint con stampa professionale"""
+def save_checkpoint(state, filename='checkpoint.pth.tar', is_best=False, save_to_wandb=False, use_wandb=False):
+    """Salva checkpoint con stampa professionale e opzione per wandb artifact"""
     torch.save(state, filename)
     print(f" {Fore.GREEN}Checkpoint saved:{Style.RESET_ALL} {filename}")
     if is_best:
         best_filename = filename.replace('.pth.tar', '_best.pth.tar')
         torch.save(state, best_filename)
         print(f" {Fore.YELLOW}Best model saved:{Style.RESET_ALL} {best_filename}")
+        # Salva il modello migliore come artefatto
+        if save_to_wandb and use_wandb:
+            artifact = wandb.Artifact(f'model-{wandb.run.id}', type='model')
+            artifact.add_file(best_filename, name='model_best.pth.tar')
+            wandb.log_artifact(artifact)
+            print(f" {Fore.BLUE}Best model saved as wandb artifact.{Style.RESET_ALL}")
 
-def print_training_summary(epoch, total_epochs, train_loss, val_loss=None, best_loss=None, lr=None, elapsed_time=None, use_validation=True):
+def print_training_summary(epoch, total_epochs, total_iterations, train_loss, val_loss=None, best_loss=None, lr=None, elapsed_time=None, use_validation=True):
     """Stampa un summary completo dell'epoca"""
     print(f"\n{Fore.CYAN} Training Summary - Epoch {epoch+1}/{total_epochs}{Style.RESET_ALL}")
+    print(f" Total iterations:     {total_iterations}")
     print(f" Train Loss:     {train_loss:.6f}")
     
     if use_validation and val_loss is not None:
         print(f" Val Loss:       {val_loss:.6f}") 
         if best_loss is not None:
-            print(f" Best Loss:      {best_loss:.6f}")
+            print(f" Best Loss:        {best_loss:.6f}")
     
     if lr is not None:
         print(f" Learning Rate:  {lr:.2e}")
@@ -253,69 +328,34 @@ def print_training_summary(epoch, total_epochs, train_loss, val_loss=None, best_
     bar = '█' * filled + '░' * (bar_length - filled)
     print(f"\n Total Progress: [{bar}] {progress*100:.1f}%")
 
+def plot_training_graph(iterations, train_losses):
+    save_path = "./"
+    plt.figure(figsize=(10, 6))
+    plt.plot(iterations, train_losses, label='Train Loss')
+    plt.xlabel("Pretraining Iteration")
+    plt.ylabel("Normalized Performance")
+    plt.title("Training Loss vs. Iterations")
+    plt.legend()
+    plt.grid(True)
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path)
+    print(f"\n{Fore.GREEN}Grafico salvato in:{Style.RESET_ALL} {save_path}")
+    plt.show()
+    plt.close() 
 
 # --------------------------------------------------
 # MAIN FUNCTION
 # --------------------------------------------------
 
-def main():
+def main():   
     import time
     import torch
     import torch.optim as optim
     from types import SimpleNamespace
     import os
     
-    # Configurazione base
-    config = SimpleNamespace(
-        # DATASET SETTINGS
-        dataset_name = "LibriSpeech", 
-        use_validation = True,      
-
-        # LibriSpeech
-        audio_length_seconds = 5,  
-        librispeech_root = "C:/Users/admin/Desktop/VS Code/data/",
-        librispeech_subset = 'clean-100',  # 'clean-100', 'clean-360', 'other-500'
-        
-        # MNIST  
-        mnist_root = "./data_mnist",
-        img_size = (128, 1000),
-        patch_size = (16, 16),
-        num_channels = 1,
-        
-        # Parametri Encoder
-        enc_embed_dim = 768,
-        enc_mlp_layer_dim = 768,
-        enc_hidden_layers = 8,
-        enc_attention_heads = 8,
-        enc_layer_norm_eps = 1e-6,
-        enc_attention_dropout = 0.1,
-        enc_mlp_ratio = 4,
-        
-        # Parametri Decoder
-        dec_hidden_layers = 6,
-        dec_embed_dim = 768,
-        dec_attention_heads = 8,
-        dec_layer_norm_eps = 1e-6,
-        dec_attention_dropout = 0.1,
-        dec_mlp_ratio = 4,
-        
-        # Masking
-        masking_strategy = "random",
-        masking_percentage = 0.75,
-        
-        # Training
-        batch_size = 32,
-        initial_lr = 1e-4,
-        weight_decay = 0.01,
-        epochs = 100,
-        print_freq = 50,
-        workers = 0,
-        pin_memory = False,
-
-        # Checkpoint
-        checkpoints_dir = "./checkpoints_mae"
-    )
-
+    config = Config()  
+    
     os.makedirs(config.checkpoints_dir, exist_ok=True)
 
     # Istanzio il modello MAE
@@ -328,34 +368,86 @@ def main():
                            lr=config.initial_lr,
                            weight_decay=config.weight_decay)
 
-    # DataLoader - scegli il tuo dataset
+    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.epochs, eta_min=0)
+
+    # Variabili per il resume
+    start_epoch = 0
+    best_loss = float('inf')
+    total_iterations_offset = 0
+    resume_info = None
+    
+    # Logica di resume
+    checkpoint_to_load = None
+    
+    if config.resume:
+        # Resume da un checkpoint specifico
+        checkpoint_to_load = config.resume
+    elif config.resume_epoch is not None:
+        # Resume da un'epoca specifica
+        checkpoint_to_load = find_checkpoint_by_epoch(config.checkpoints_dir, config.resume_epoch)
+        if checkpoint_to_load is None:
+            print(f"{Fore.RED}Checkpoint per l'epoca {config.resume_epoch} non trovato!{Style.RESET_ALL}")
+            return
+    
+    # Carica il checkpoint se specificato
+    if checkpoint_to_load:
+        resume_info = load_checkpoint(checkpoint_to_load, model, optimizer, scheduler, device)
+        if resume_info:
+            start_epoch = resume_info['start_epoch']
+            best_loss = resume_info['best_loss']
+            total_iterations_offset = resume_info['total_iterations']
+            print_resume_info(start_epoch, config.checkpoints_dir)
+        else:
+            print(f"{Fore.RED}Impossibile caricare il checkpoint, iniziando da zero{Style.RESET_ALL}")
+
+    # Inizializza wandb solo se abilitato
+    
+    if config.use_wandb:
+        wandb.init(
+            project=config.wandb_project,
+            entity=config.wandb_entity,
+            config=vars(config),
+            resume="allow" if resume_info else False,
+            id=wandb.util.generate_id() if not resume_info else None
+        )
+        
+        run_name = f'{config.dataset_name}-epochs_{config.epochs}-lr_{config.initial_lr}'
+        if resume_info:
+            run_name += f'-resumed_from_{start_epoch}'
+        run_name += f'-{wandb.run.id}'
+        
+        wandb.run.name = run_name
+        wandb.run.save()
+
+        wandb.watch(model, log='gradients', log_freq=config.print_freq * 5)
+    else:
+        print(f"{Fore.YELLOW}WandB logging disabilitato{Style.RESET_ALL}")
+
+    # DataLoader 
     if config.dataset_name == "LibriSpeech":
         spectrogram_transform = AudioToSpectrogram(
-        n_mels=128,
-        sample_rate=16000,
-        hop_length=160,  # ~10ms hop
-        n_fft=512,       # ~32ms window (più frequenze)
-        to_db=True,
-        normalize=True
+            n_mels=128,
+            sample_rate=16000,
         )
         
         train_dataset_spec = LibriSpeech(
             root=config.librispeech_root,
             train=True,
             download=False,  # Già scaricato
-            subset='clean-100',
+            subset='clean-100-small',
             transform=spectrogram_transform
         )
         
         # Test DataLoader con spettrogrammi
-        train_loader_spec = torch.utils.data.DataLoader(
+        train_loader = torch.utils.data.DataLoader(
             train_dataset_spec,
             batch_size=config.batch_size,
             shuffle=True,
             num_workers=0,
-            collate_fn=lambda batch: collate_fn_spectrogram(batch, target_time_frames=1000)  # 1008 = 63*16 patch perfette
+            collate_fn=lambda batch: collate_fn_spectrogram(batch, target_time_frames=1024)  
         )
-        # Validation loader (solo se richiesto)
+
+        # Validation loader 
         if config.use_validation:
             val_dataset = LibriSpeech(
                 root=config.librispeech_root,
@@ -369,38 +461,44 @@ def main():
                 shuffle=False,
                 num_workers=config.workers,
                 pin_memory=True,
-                collate_fn=lambda batch: collate_fn_spectrogram(batch, target_time_frames=1000)  # 1008 = 63*16 patch perfette
-                # collate_fn=lambda batch: collate_fn_crop(batch, max_length=80000*3)
+                collate_fn=lambda batch: collate_fn_spectrogram(batch, target_time_frames=1024)
             )
         else:
             val_loader = None
             
     else:
         # Usa MNIST o altro dataset
-        # train_loader, val_loader = data_loader_mnist(...)
         pass
     
-    print_header(config.dataset_name, config.use_validation)
+    print_header(config.dataset_name, config.use_validation, device, resume_info)
 
-    best_loss = float('inf')
     total_epochs = config.epochs
     
-    for epoch in range(total_epochs):
+    checkpoint_epochs = [1, 2, 4, 6, 8, 10, 12, 14, 16]
+    iterations_per_epoch = len(train_loader)
+
+    all_iterations = []
+    all_train_losses = []
+
+    # Training loop modificato per supportare il resume
+    for epoch in range(start_epoch, total_epochs):
         epoch_start = time.time()
         
-        # Adjust learning rate
-        lr = adjust_learning_rate(optimizer, epoch, config.initial_lr)
+        lr = optimizer.param_groups[0]['lr']
         print_epoch_header(epoch, total_epochs, lr)
 
         # Training
-        train_loss = train(train_loader_spec, model, optimizer, epoch, total_epochs, 
-                          config.print_freq, device, pretraining=True)
+        train_loss, train_recon_loss, train_class_loss = train(train_loader, model, optimizer, epoch, total_epochs, config.print_freq, device, pretraining=True, use_wandb=config.use_wandb)
         
+        total_iterations = total_iterations_offset + (epoch - start_epoch + 1) * iterations_per_epoch
+        all_iterations.append(total_iterations)
+        all_train_losses.append(train_loss)
+
         # Validation (solo se richiesta)
-        val_loss = None
+        val_loss, val_recon_loss, val_class_loss = None, None, None
         if config.use_validation and val_loader is not None:
-            val_loss = validate(val_loader, model, epoch, config.print_freq, device, 
-                               pretraining=True)
+            val_loss, val_recon_loss, val_class_loss = validate(val_loader, model, epoch, config.print_freq, device, 
+                                    pretraining=True)
             
             is_best = val_loss < best_loss
             best_loss = min(val_loss, best_loss)
@@ -409,18 +507,47 @@ def main():
             is_best = train_loss < best_loss
             best_loss = min(train_loss, best_loss)
         
-        # Save checkpoint
-        save_checkpoint({
-            'epoch': epoch + 1,
-            'state_dict': model.state_dict(),
-            'best_loss': best_loss,
-            'optimizer': optimizer.state_dict(),
-        }, filename=f'{config.checkpoints_dir}/checkpoint_epoch_{epoch+1}.pth', is_best=is_best)
+        epoch_log_dict = {
+            'epoch/train_loss': train_loss,
+            'epoch/train_recon_loss': train_recon_loss,
+            'epoch/train_class_loss': train_class_loss,
+            'epoch/epoch': epoch + 1,
+            'epoch/total_iterations': total_iterations,
+        }
+        if val_loss is not None:
+            epoch_log_dict.update({
+                'epoch/val_loss': val_loss,
+                'epoch/val_recon_loss': val_recon_loss,
+                'epoch/val_class_loss': val_class_loss,
+            })
         
+        if use_wandb:
+            wandb.log(epoch_log_dict)
+
+        if (epoch + 1) in checkpoint_epochs or (epoch + 1) % 5 == 0:  # Salva anche ogni 5 epoche
+            # Definisci lo stato da salvare (includendo anche lo scheduler)
+            state = {
+                'epoch': epoch + 1,
+                'total_iterations': total_iterations,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'loss': train_loss,  
+                'best_loss': best_loss,
+                'config': vars(config)  # Salva anche la configurazione
+            }
+            filename = f'{config.checkpoints_dir}/checkpoint_epoch_{epoch+1}.pth'
+            save_checkpoint(state, filename=filename, is_best=is_best, save_to_wandb=False, use_wandb=use_wandb)
+
         # Training summary
         epoch_time = time.time() - epoch_start
-        print_training_summary(epoch, total_epochs, train_loss, val_loss, 
-                             best_loss, lr, epoch_time, config.use_validation)
+
+        scheduler.step()
+        
+    if use_wandb:
+        wandb.finish()
+    else:
+        print(f"\n{Fore.GREEN}Training completato!{Style.RESET_ALL}")
 
 if __name__ == '__main__':
     main()
