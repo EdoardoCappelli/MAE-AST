@@ -37,27 +37,29 @@ class Config:
             learnable_pos_emb = True,
             use_cls = False,
             batch_size = 32,
-            initial_lr = 0.0001,
+            initial_lr = 1e-4,
             lambda_recon = 10,
-            epochs = 50,
-            weight_decay = 0.05,
+            epochs = 16,
+            weight_decay = 0.01,
             sample_size = 4000,
             print_freq = 50,
-            dataset_dir = "D:/data/spectrograms/balanced_train_segments",
-            checkpoints_dir = "D:/checkpoints",
-            npy_dir = "MAE-AST/spectrograms/balanced_train_segments",
-            tensor_dir = "MAE-AST/tensors/balanced_train_segments",
+            dataset_dir = "./data/spectrograms/balanced_train_segments",
+            checkpoints_dir = "./checkpoints",
+            npy_dir = "./data/spectrograms/balanced_train_segments",
+            tensor_dir = "./data/tensors/balanced_train_segments",
+            checkpoint_epochs = [1, 2, 4, 6, 8, 10, 12, 14, 16],
             resume = None,   # Path to a specific checkpoint to resume training
             resume_epoch = None,  # Resume training from a specific epoch number  
+            warmup_percentage = 0.1, 
 
             # Dataset 
             audio_length_seconds = 5,  
-            librispeech_root = "./data/",
+            librispeech_root = "./data",
             librispeech_subset = 'clean-100',  # 'clean-100', 'clean-360', 'other-500'
             download_librispeech = True,
 
             # WandB
-            use_wandb = False,
+            use_wandb = True,
             wandb_project = "mae-librispeech-pretraining",
             wandb_entity = "edoardocappelli1999",  
             save_artifacts = True, # Salva i modelli migliori come artefatti
@@ -112,7 +114,9 @@ class Config:
         self.sample_size = sample_size
         self.resume = resume
         self.resume_epoch = resume_epoch  # Specific epoch to resume training from
-
+        self.checkpoint_epochs = checkpoint_epochs 
+        self.warmup_percentage = warmup_percentage
+        
         # Dataset
         self.audio_length_seconds = audio_length_seconds   
         self.librispeech_root = librispeech_root
