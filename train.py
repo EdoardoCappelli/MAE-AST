@@ -8,9 +8,9 @@ from losses import infoNCE_loss, mae_loss
 from colorama import Fore, Style, init
 import matplotlib.pyplot as plt
 from torch.optim import lr_scheduler
-import os 
+import os
 import wandb
-from config import Config 
+from config import Config
 import glob
 import argparse
 
@@ -22,7 +22,7 @@ def data_loader_librispeech(root, batch_size=32, workers=4, pin_memory=True, sam
     train_dataset = LibriSpeech(
         root=root,
         train=True,
-        download=True, 
+        download=True,
         subset='clean-100'  # Usa train-clean-100
     )
 
@@ -155,7 +155,8 @@ def print_epoch_header(epoch, total_epochs, lr):
     print(f"\n{Fore.YELLOW}┌─ Epoch {epoch+1:3d}/{total_epochs} ")
     print(f"{Fore.YELLOW}│{Style.RESET_ALL} Learning Rate: {Fore.GREEN}{lr:.2e}{Style.RESET_ALL}")
 
-def train(train_loader, model, optimizer, epoch, total_epochs, print_freq=100, device='cuda', pretraining=True, use_wandb=False):
+# --- MODIFICA #1: La funzione `train` ora accetta `initial_step` ---
+def train(train_loader, model, optimizer, epoch, total_epochs, print_freq=100, device='cuda', pretraining=True, use_wandb=False, initial_step=0):
     """Loop di training professionale per un epoch"""
     batch_time = AverageMeter() # batch_time - data_time alto → Riduci model size, aumenta batch size
     data_time = AverageMeter() # data_time alto → Aumenta num_workers, usa SSD, ottimizza dataset
@@ -166,7 +167,6 @@ def train(train_loader, model, optimizer, epoch, total_epochs, print_freq=100, d
     model.train()
     end = time.time()
     
-    # Calcola ETA
     total_batches = len(train_loader)
     
     for i, (input, _) in enumerate(train_loader):
@@ -218,14 +218,16 @@ def train(train_loader, model, optimizer, epoch, total_epochs, print_freq=100, d
                   f"│ Time: {batch_time.val:.3f}s "
                   f"│ ETA: {format_time(eta_seconds)}")
             
-            step = epoch * total_batches + i
+            # --- MODIFICA #2: Calcolo dello step corretto per wandb ---
+            # Usa l'offset delle iterazioni precedenti per calcolare lo step globale
+            step = initial_step + i
             if use_wandb:
                 wandb.log({
                     "train/step_loss": losses.val,
                     "train/step_recon_loss": recon_losses.val,
                     "train/step_class_loss": class_losses.val,
                     "learning_rate": optimizer.param_groups[0]['lr'],
-                    "step": step,
+                    "step": step,  # Usa lo step globale corretto
                     "epoch": epoch + 1
                 })
 
@@ -239,7 +241,8 @@ def train(train_loader, model, optimizer, epoch, total_epochs, print_freq=100, d
           f"Time: {format_time(batch_time.sum)}")
     print(f"{Fore.YELLOW}└─{Style.RESET_ALL}")
     
-    return losses.avg, recon_losses.avg, class_losses.avg
+    # --- MODIFICA #3: Restituisce il numero di iterazioni di questa epoca ---
+    return losses.avg, recon_losses.avg, class_losses.avg, total_batches
 
 def validate(val_loader, model, epoch, print_freq=100, device='cuda', pretraining=True):
     """Loop di validazione professionale"""
@@ -282,10 +285,10 @@ def validate(val_loader, model, epoch, print_freq=100, device='cuda', pretrainin
     # Validation summary
     print("\n" + "─" * 50)
     print(f" {Fore.GREEN}Validation Results{Style.RESET_ALL}")
-    print(f"    Total Loss:    {Fore.CYAN}{losses.avg:.6f}{Style.RESET_ALL}")
-    print(f"    Recon Loss:    {Fore.BLUE}{recon_losses.avg:.6f}{Style.RESET_ALL}")
-    print(f"    Class Loss:    {Fore.MAGENTA}{class_losses.avg:.6f}{Style.RESET_ALL}")
-    print(f"    Avg Time:     {batch_time.avg:.3f}s/batch")
+    print(f"     Total Loss:   {Fore.CYAN}{losses.avg:.6f}{Style.RESET_ALL}")
+    print(f"     Recon Loss:   {Fore.BLUE}{recon_losses.avg:.6f}{Style.RESET_ALL}")
+    print(f"     Class Loss:   {Fore.MAGENTA}{class_losses.avg:.6f}{Style.RESET_ALL}")
+    print(f"     Avg Time:     {batch_time.avg:.3f}s/batch")
     print("─" * 50)
     
     return losses.avg, recon_losses.avg, class_losses.avg
@@ -309,17 +312,17 @@ def print_training_summary(epoch, total_epochs, total_iterations, train_loss, va
     """Stampa un summary completo dell'epoca"""
     print(f"\n{Fore.CYAN} Training Summary - Epoch {epoch+1}/{total_epochs}{Style.RESET_ALL}")
     print(f" Total iterations:     {total_iterations}")
-    print(f" Train Loss:     {train_loss:.6f}")
+    print(f" Train Loss:           {train_loss:.6f}")
     
     if use_validation and val_loss is not None:
-        print(f" Val Loss:       {val_loss:.6f}") 
+        print(f" Val Loss:             {val_loss:.6f}") 
         if best_loss is not None:
-            print(f" Best Loss:        {best_loss:.6f}")
+            print(f" Best Loss:            {best_loss:.6f}")
     
     if lr is not None:
-        print(f" Learning Rate:  {lr:.2e}")
+        print(f" Learning Rate:        {lr:.2e}")
     if elapsed_time is not None:
-        print(f" Epoch Time:     {format_time(elapsed_time)}")
+        print(f" Epoch Time:           {format_time(elapsed_time)}")
     
     # Progress bar per le epoche
     progress = (epoch + 1) / total_epochs
@@ -329,7 +332,7 @@ def print_training_summary(epoch, total_epochs, total_iterations, train_loss, va
     print(f"\n Total Progress: [{bar}] {progress*100:.1f}%")
 
 def plot_training_graph(iterations, train_losses):
-    save_path = "./"
+    save_path = "./training_loss.png"
     plt.figure(figsize=(10, 6))
     plt.plot(iterations, train_losses, label='Train Loss')
     plt.xlabel("Pretraining Iteration")
@@ -341,13 +344,13 @@ def plot_training_graph(iterations, train_losses):
     plt.savefig(save_path)
     print(f"\n{Fore.GREEN}Grafico salvato in:{Style.RESET_ALL} {save_path}")
     plt.show()
-    plt.close() 
+    plt.close()
 
 # --------------------------------------------------
 # MAIN FUNCTION
 # --------------------------------------------------
 
-def main():   
+def main():  
     import time
     import torch
     import torch.optim as optim
@@ -373,6 +376,8 @@ def main():
     # Variabili per il resume
     start_epoch = 0
     best_loss = float('inf')
+    # --- MODIFICA #4: Rinominata la variabile per chiarezza ---
+    # Questo è l'offset da cui partire, sarà 0 se si inizia da zero.
     total_iterations_offset = 0
     resume_info = None
     
@@ -401,7 +406,6 @@ def main():
             print(f"{Fore.RED}Impossibile caricare il checkpoint, iniziando da zero{Style.RESET_ALL}")
 
     # Inizializza wandb solo se abilitato
-    
     if config.use_wandb:
         wandb.init(
             project=config.wandb_project,
@@ -433,12 +437,11 @@ def main():
         train_dataset_spec = LibriSpeech(
             root=config.librispeech_root,
             train=True,
-            download=config.download_librispeech,  # Già scaricato
+            download=config.download_librispeech,
             subset=config.librispeech_subset,
             transform=spectrogram_transform
         )
         
-        # Test DataLoader con spettrogrammi
         train_loader = torch.utils.data.DataLoader(
             train_dataset_spec,
             batch_size=config.batch_size,
@@ -453,7 +456,8 @@ def main():
                 root=config.librispeech_root,
                 train=False,
                 download=True,
-                subset='clean'  # usa test-clean per validation
+                subset='test-clean',  # usa test-clean per validation
+                transform=spectrogram_transform
             )
             val_loader = torch.utils.data.DataLoader(
                 val_dataset,
@@ -475,10 +479,13 @@ def main():
     total_epochs = config.epochs
     
     checkpoint_epochs = [1, 2, 4, 6, 8, 10, 12, 14, 16]
-    iterations_per_epoch = len(train_loader)
 
     all_iterations = []
     all_train_losses = []
+
+    # --- MODIFICA #5: Inizializza il contatore delle iterazioni totali ---
+    # Questo contatore verrà aggiornato dopo ogni epoca.
+    current_total_iterations = total_iterations_offset
 
     # Training loop modificato per supportare il resume
     for epoch in range(start_epoch, total_epochs):
@@ -488,17 +495,24 @@ def main():
         print_epoch_header(epoch, total_epochs, lr)
 
         # Training
-        train_loss, train_recon_loss, train_class_loss = train(train_loader, model, optimizer, epoch, total_epochs, config.print_freq, device, pretraining=True, use_wandb=config.use_wandb)
+        # --- MODIFICA #6: Passa l'offset delle iterazioni e ricevi il numero di iterazioni dell'epoca ---
+        train_loss, train_recon_loss, train_class_loss, iters_in_epoch = train(
+            train_loader, model, optimizer, epoch, total_epochs, 
+            config.print_freq, device, pretraining=True, use_wandb=config.use_wandb,
+            initial_step=current_total_iterations
+        )
         
-        total_iterations = total_iterations_offset + (epoch - start_epoch + 1) * iterations_per_epoch
-        all_iterations.append(total_iterations)
+        # --- MODIFICA #7: Aggiorna il contatore totale delle iterazioni ---
+        current_total_iterations += iters_in_epoch
+
+        all_iterations.append(current_total_iterations)
         all_train_losses.append(train_loss)
 
         # Validation (solo se richiesta)
         val_loss, val_recon_loss, val_class_loss = None, None, None
         if config.use_validation and val_loader is not None:
             val_loss, val_recon_loss, val_class_loss = validate(val_loader, model, epoch, config.print_freq, device, 
-                                    pretraining=True)
+                                                                 pretraining=True)
             
             is_best = val_loss < best_loss
             best_loss = min(val_loss, best_loss)
@@ -512,7 +526,7 @@ def main():
             'epoch/train_recon_loss': train_recon_loss,
             'epoch/train_class_loss': train_class_loss,
             'epoch/epoch': epoch + 1,
-            'epoch/total_iterations': total_iterations,
+            'epoch/total_iterations': current_total_iterations,
         }
         if val_loss is not None:
             epoch_log_dict.update({
@@ -521,14 +535,15 @@ def main():
                 'epoch/val_class_loss': val_class_loss,
             })
         
-        if use_wandb:
-            wandb.log(epoch_log_dict)
+        if config.use_wandb:
+            wandb.log(epoch_log_dict, step=current_total_iterations) # Logga a fine epoca usando lo step totale
 
         if (epoch + 1) in checkpoint_epochs or (epoch + 1) % 5 == 0:  # Salva anche ogni 5 epoche
             # Definisci lo stato da salvare (includendo anche lo scheduler)
             state = {
                 'epoch': epoch + 1,
-                'total_iterations': total_iterations,
+                # --- MODIFICA #8: Salva il contatore aggiornato delle iterazioni totali ---
+                'total_iterations': current_total_iterations,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
@@ -537,17 +552,21 @@ def main():
                 'config': vars(config)  # Salva anche la configurazione
             }
             filename = f'{config.checkpoints_dir}/checkpoint_epoch_{epoch+1}.pth'
-            save_checkpoint(state, filename=filename, is_best=is_best, save_to_wandb=False, use_wandb=use_wandb)
+            save_checkpoint(state, filename=filename, is_best=is_best, save_to_wandb=False, use_wandb=config.use_wandb)
 
         # Training summary
         epoch_time = time.time() - epoch_start
+        print_training_summary(epoch, total_epochs, current_total_iterations, train_loss, val_loss, best_loss, lr, epoch_time, config.use_validation)
 
         scheduler.step()
         
-    if use_wandb:
+    if config.use_wandb:
         wandb.finish()
     else:
         print(f"\n{Fore.GREEN}Training completato!{Style.RESET_ALL}")
+    
+    # plot_training_graph(all_iterations, all_train_losses)
+
 
 if __name__ == '__main__':
     main()
