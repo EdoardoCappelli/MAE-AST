@@ -13,6 +13,7 @@ import wandb
 from config import Config
 import glob
 import argparse
+from transformers import get_polynomial_decay_schedule_with_warmup
 
 # --------------------------------------------------
 # DATA LOADER
@@ -371,7 +372,6 @@ def main():
                            lr=config.initial_lr,
                            weight_decay=config.weight_decay)
 
-    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.epochs, eta_min=0)
 
     # Variabili per il resume
     start_epoch = 0
@@ -415,7 +415,7 @@ def main():
             id=wandb.util.generate_id() if not resume_info else None
         )
         
-        run_name = f'{config.dataset_name}-epochs_{config.epochs}-lr_{config.initial_lr}'
+        run_name = f'{config.dataset_name}-epochs_{config.epochs}-lr_{config.initial_lr}-sched_poly'
         if resume_info:
             run_name += f'-resumed_from_{start_epoch}'
         run_name += f'-{wandb.run.id}'
@@ -476,9 +476,28 @@ def main():
     
     print_header(config.dataset_name, config.use_validation, device, resume_info)
 
-    total_epochs = config.epochs
     
-    checkpoint_epochs = [1, 2, 4, 6, 8, 10, 12, 14, 16]
+    # scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.epochs, eta_min=0)
+    # scheduler = lr_scheduler.PolynomialLR(
+    #     optimizer,
+    #     total_iters=num_training_steps,
+    #     power=1.0,   
+    #     end_lr=0.0   
+    # )
+    
+    total_epochs = config.epochs
+    num_training_steps = len(train_loader) * total_epochs
+    num_warmup_steps = int(config.warmup_percentage * num_training_steps)
+    scheduler = get_polynomial_decay_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps=num_warmup_steps,
+        num_training_steps=num_training_steps,
+        lr_end=0.0,   
+        power=1.0,   
+        last_epoch=-1
+    )
+
+    checkpoint_epochs = config.checkpoint_epochs
 
     all_iterations = []
     all_train_losses = []
