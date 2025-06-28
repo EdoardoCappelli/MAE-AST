@@ -2,8 +2,6 @@ import torch
 import torch.nn.functional as F 
 
 def mae_loss(target, recon_logits):
-    # masked_target = target[bool_mask]
-    # masked_recon = recon_logits[bool_mask]
     loss_recon = F.mse_loss(target, recon_logits)
     return loss_recon
 
