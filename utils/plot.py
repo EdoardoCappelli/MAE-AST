@@ -2,6 +2,9 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from colorama import Fore, Style
+import torch 
+from typing import Optional, Callable, Tuple, List
+from config import Config 
 
 def plot_normalized_loss(args, steps, loss, train=True, save_path = None):
     if args.epochs >= 8:
