@@ -62,7 +62,7 @@ bash run_experiments.sh
 
 ## Results
 
-Results are showed in the MAE.pdf.
+Results are showed in `MAE.pdf`.
 
 -----
 
