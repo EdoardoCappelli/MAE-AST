@@ -39,6 +39,11 @@ Before running the experiments, you need to download the audio datasets. Dedicat
     ```
 -----
 
+## Configuration
+Specific architectural parameters and other experiment settings can be easily modified in the `config.py` file. This allows for flexible customization without altering the main scripts.
+
+-----
+
 ## Running Experiments
 
 The `run_experiments.sh` file is the main script for executing pre-training and fine-tuning experiments.
