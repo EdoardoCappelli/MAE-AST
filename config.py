@@ -79,11 +79,11 @@ class Config:
             esc_percentage = 1,
 
             # WandB
-            use_wandb = True,
+            use_wandb = False,
             finetuning_wandb_project = "mae-finetuning",
             pretraining_wandb_project = "mae-pretraining",
-            wandb_entity = "edoardocappelli1999",  
-            save_artifacts = True, # Salva i modelli migliori come artefatti
+            wandb_entity = "name_entity",  
+            save_artifacts = False, 
             **kwargs
     ):
         super().__init__()
