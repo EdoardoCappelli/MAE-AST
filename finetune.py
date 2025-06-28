@@ -18,7 +18,7 @@ import wandb
 import glob
 import argparse
 from transformers import get_polynomial_decay_schedule_with_warmup
-from utils import plot_normalized_loss
+from utils.plot import plot_normalized_loss
 
 # Per colorama
 init(autoreset=True)
