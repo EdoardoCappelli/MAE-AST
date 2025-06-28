@@ -8,7 +8,7 @@ from torch.utils.data import Subset, DataLoader
 from pathlib import Path 
 from dataloader_pretraining import AudioToSpectrogram, LibriSpeechAudioDataset, AudioSetAudioDataset, PretrainingDataset, collate_fn_spectrogram
 from mae import MAE 
-from losses import infoNCE_loss, mae_loss
+from utils.losses import infoNCE_loss, mae_loss
 from colorama import Fore, Style, init
 import matplotlib.pyplot as plt
 from torch.optim import lr_scheduler
@@ -17,7 +17,7 @@ import glob
 import argparse
 from transformers import get_polynomial_decay_schedule_with_warmup
 from config import Config   
-from utils import plot_normalized_loss
+from utils.plot import plot_normalized_loss
 
 # Per colorama
 init(autoreset=True)
