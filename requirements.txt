@@ -1,0 +1,12 @@
+torch
+torchaudio
+pandas
+scikit-learn
+timm
+matplotlib
+colorama
+wandb
+soundfile
+transformers
+yt-dlp
+torchinfo
