@@ -1,6 +1,6 @@
 # MAE-AST
 
-This project implements **MAE-AST**, a Masked Autoencoder for Audio Spectrogram Transformers. The goal is to replicate the some results highlighted in the Table 1 of the paper. 
+This project implements **MAE-AST**, a Masked Autoencoder for Audio Spectrogram Transformers. The goal is to replicate the some results highlighted in the Table 1 of the paper https://arxiv.org/pdf/2203.16691. 
 
 -----
 
