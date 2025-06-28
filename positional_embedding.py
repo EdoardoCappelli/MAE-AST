@@ -2,37 +2,8 @@ import torch
 import torch.nn as nn
 import math
 
-
 def SinusoidalPositionalEncoding(embed_dim: int, height: int, width: int, cls_token: bool = False):
 
-    """
-    Genera codifiche posizionali sinusoidali 2D.
-
-    La codifica è simile a quella utilizzata in DETR. Per ogni posizione (h, w),
-    il vettore di codifica pe[h,w] di dimensione embed_dim è popolato come segue:
-    Sia embed_dim_half = embed_dim / 2.
-    Per i primi embed_dim_half canali (relativi alla larghezza):
-        pe[h,w,2i]   = sin(w / (10000^(2i/embed_dim_half)))
-        pe[h,w,2i+1] = cos(w / (10000^(2i/embed_dim_half)))
-    Per i successivi embed_dim_half canali (relativi all'altezza):
-        pe[h,w,embed_dim_half + 2i]   = sin(h / (10000^(2i/embed_dim_half)))
-        pe[h,w,embed_dim_half + 2i+1] = cos(h / (10000^(2i/embed_dim_half)))
-
-    La funzione restituisce un tensore di forma (height*width, embed_dim) o
-    (1 + height*width, embed_dim) se cls_token è True.
-
-    :param embed_dim: La dimensione degli embedding del modello. Deve essere un multiplo di 4.
-    :param height: L'altezza della griglia 2D.
-    :param width: La larghezza della griglia 2D.
-    :param cls_token: Se True, una codifica posizionale nulla (zeri) per un token CLS
-                    viene anteposta alla sequenza delle codifiche posizionali.
-                    Default: False.
-    :return: Un tensore contenente le codifiche posizionali.
-            Forma: (height * width, embed_dim) se cls_token è False.
-            Forma: (1 + height * width, embed_dim) se cls_token è True,
-                    dove la prima riga è il vettore nullo per il token CLS.
-    :raises ValueError: Se embed_dim non è un multiplo di 4.
-    """
     if embed_dim % 4 != 0:
         raise ValueError(
             "Impossibile utilizzare la codifica posizionale sin/cos con embed_dim={:d}. "
@@ -68,11 +39,3 @@ def SinusoidalPositionalEncoding(embed_dim: int, height: int, width: int, cls_to
         return final_pe.unsqueeze(0)
     else:
         return pe_sequence.unsqueeze(0)
-    
-def simple_1d_pe(embed_dim: int, seq_len: int):
-    position = torch.arange(seq_len).unsqueeze(1).float()
-    div_term = torch.exp(torch.arange(0, embed_dim, 2).float() * (-math.log(10000.0) / embed_dim))
-    pe = torch.zeros(seq_len, embed_dim)
-    pe[:, 0::2] = torch.sin(position * div_term)
-    pe[:, 1::2] = torch.cos(position * div_term)
-    return pe.unsqueeze(0)  # Add batch dimension
