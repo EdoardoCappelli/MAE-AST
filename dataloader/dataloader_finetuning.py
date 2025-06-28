@@ -164,63 +164,40 @@ class VoxCelebGenderDataset(Dataset):
 class ESCAudioDataset(Dataset):
     """
     Dataset ESC-50 per la classificazione dei suoni ambientali.
-    Permette di selezionare un sottoinsieme casuale di classi.
     """
     def __init__(
         self,
         root: str, 
         meta_file: str, 
         transform: Optional[Callable] = None,
-        num_classes: Optional[int] = None
     ):
         self.root = Path(root)
         self.meta_file = Path(meta_file)
         self.transform = transform
         self.dataset_name = "ESC-50"
-        self.num_classes = num_classes
         
         if not self.root.exists():
             raise RuntimeError(f"Directory root di ESC-50 non trovata a {self.root}")
         if not self.meta_file.exists():
             raise RuntimeError(f"File meta di ESC-50 non trovato a {self.meta_file}")
             
-        # Carica i dati e il label encoder appropriato
-        self.data, self.label_encoder = self._load_data()
+        # Carica i dati
+        self.data = self._load_data()
         
-        num_actual_classes = len(self.label_encoder.classes_)
-        print(f"Caricati {len(self.data)} campioni da {self.dataset_name} usando {num_actual_classes} classi.")
+        print(f"Caricati {len(self.data)} campioni da {self.dataset_name}")
         
         category_counts = pd.Series([d[2] for d in self.data]).value_counts().to_dict()
-        print(f"Distribuzione delle categorie per {self.dataset_name} (prime 10): {dict(list(category_counts.items())[:10])}")
+        print(f"Distribuzione delle categorie per {self.dataset_name}: {category_counts}")
 
-    def _load_data(self) -> Tuple[List[Tuple[str, int, str]], LabelEncoder]:
-        """
-        Carica i percorsi dei file audio e le relative label.
-        Filtra le classi se num_classes è specificato.
-        """
+    def _load_data(self) -> List[Tuple[str, int, str]]:
+        """Carica i percorsi dei file audio e le relative label target/categoria."""
         df = pd.read_csv(self.meta_file)
-        
-        # --- LOGICA DI SELEZIONE CLASSI ---
-        if self.num_classes is not None:
-            if not 1 <= self.num_classes <= 50:
-                raise ValueError("Il numero di classi deve essere compreso tra 1 e 50.")
-            
-            unique_categories = df['category'].unique()
-            random.shuffle(unique_categories)
-            
-            selected_categories = unique_categories[:self.num_classes]
-            print(f"Selezionate casualmente {self.num_classes} classi: {selected_categories.tolist()}")
-            
-            df = df[df['category'].isin(selected_categories)].reset_index(drop=True)
-
-        label_encoder = LabelEncoder()
-        df['target'] = label_encoder.fit_transform(df['category'])
-        
         data = []
-        for _, row in tqdm(df.iterrows(), total=len(df), desc=f"Caricamento dati {self.dataset_name}"):
+        
+        for idx, row in tqdm(df.iterrows(), total=len(df), desc=f"Caricamento dati {self.dataset_name}"):
             filename = row['filename']
-            target_label = row['target']    
-            category_name = row['category']  
+            target_label = row['target'] # Etichetta numerica della categoria
+            category_name = row['category'] # Nome della categoria (es. 'dog')
             
             audio_path = self.root / filename
             
@@ -229,7 +206,7 @@ class ESCAudioDataset(Dataset):
             else:
                 print(f"Avviso: File audio non trovato: {audio_path}. Ignorato.")
 
-        return data, label_encoder
+        return data
 
     def __len__(self) -> int:
         return len(self.data)
@@ -239,7 +216,6 @@ class ESCAudioDataset(Dataset):
         
         waveform, sample_rate = torchaudio.load(audio_path)
         
-        # Resample a 16kHz se necessario, come richiesto da molti modelli pre-addestrati
         if sample_rate != 16000:
             resampler = T.Resample(orig_freq=sample_rate, new_freq=16000)
             waveform = resampler(waveform)
@@ -256,10 +232,6 @@ class ESCAudioDataset(Dataset):
         }
         
         return result
-
-    def get_label_encoder(self):
-        """Restituisce il LabelEncoder utilizzato, utile per decodificare le predizioni."""
-        return self.label_encoder
 
 
 def collate_fn_spectrogram(batch, target_time_frames=1024): 
