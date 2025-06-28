@@ -1,4 +1,4 @@
-!/bin/bash
+#!/bin/bash
 
 echo "Avvio della fase di pre-training..."
 python pretrain.py --masking_strategy patch --epochs 16
