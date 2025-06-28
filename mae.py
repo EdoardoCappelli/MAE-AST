@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from positional_embedding import SinusoidalPositionalEncoding, simple_1d_pe
+from utils.positional_embedding import SinusoidalPositionalEncoding, simple_1d_pe
 from timm.models.vision_transformer import Block
-from masking import Mask
-from losses import infoNCE_loss, mae_loss 
+from utils.masking import Mask
+from utils.losses import infoNCE_loss, mae_loss 
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import Tuple, List
