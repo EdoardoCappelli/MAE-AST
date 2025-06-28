@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils.positional_embedding import SinusoidalPositionalEncoding, simple_1d_pe
+from utils.positional_encoding import SinusoidalPositionalEncoding, simple_1d_pe
 from timm.models.vision_transformer import Block
 from utils.masking import Mask
 from utils.losses import infoNCE_loss, mae_loss 
