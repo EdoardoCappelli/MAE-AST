@@ -31,12 +31,45 @@ Before running the experiments, download the audio datasets. Dedicated scripts a
     python download/download_esc.py
     ```
 
-  * **AudioSet (for VoxCeleb):**
+  * **AudioSet:**
     To download AudioSet audios, which are based on YouTube, you need to have **FFmpeg** installed on your system. FFmpeg is used to download the videos and extract the 10-second audio segments.
 
     ```bash
     python download/download_audioset.py
     ```
+  * **VoxCeleb1:**
+    You can download the VoxCeleb1 dataset directly from Hugging Face.
+    Download the audio files:
+    
+    ```bash
+    wget https://huggingface.co/datasets/ProgramComputer/voxceleb/resolve/main/vox1/vox1_dev_wav.zip?download=true -O path/to/vox1_dev_wav.zip
+    ```
+
+    Download the metadata file:
+    
+    ```bash
+    wget https://huggingface.co/datasets/ProgramComputer/voxceleb/resolve/main/vox1/vox1_meta.csv -O path/to/vox1_meta.csv
+    ```
+
+After downloading, your data/ directory should have a structure similar to this, containing both audio content and metadata for fine-tuning:
+
+```bash
+data/
+
+├── AudioSet/
+    ├── balanced_train/
+    ├── balanced_train_segments.csv
+
+├── VoxCeleb/
+    ├── vox1_dev_wav
+    ├── vox1_meta.csv
+
+├── LibriSpeech/
+    ├── train-clean-100/
+    ├── SPEAKERS.TXT
+
+└── ESC/
+```
 -----
 
 ## Configuration
