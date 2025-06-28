@@ -23,7 +23,7 @@ This project implements **MAE-AST**, a Masked Autoencoder for Audio Spectrogram 
 
 ## Dataset Download
 
-Before running the experiments, you need to download the audio datasets. Dedicated scripts are provided for this purpose:
+Before running the experiments, download the audio datasets. Dedicated scripts are provided for this purpose:
 
   * **ESC-50:**
 
