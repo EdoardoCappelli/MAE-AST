@@ -9,7 +9,7 @@ import torch.nn as nn
 from pathlib import Path 
 from config import Config 
 from mae import MAE 
-from dataloader.dataloader_finetuning import AudioToSpectrogram, VoxCelebGenderDataset, ESCAudioDataset, collate_fn_spectrogram
+from dataloader.dataloader_finetuning import AudioToSpectrogram, VoxCelebGenderDataset, VoxCelebSpeakerDataset, ESCAudioDataset, collate_fn_spectrogram
 from colorama import Fore, Style, init
 import matplotlib.pyplot as plt
 from torch.optim import lr_scheduler
