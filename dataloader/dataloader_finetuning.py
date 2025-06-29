@@ -50,12 +50,6 @@ class AudioToSpectrogram:
     def __call__(self, waveform: torch.Tensor) -> torch.Tensor:
         """
         Convert waveform to mel-spectrogram.
-        
-        Args:
-            waveform: Tensor of shape [channels, time] or [time]
-        
-        Returns:
-            spectrogram: Tensor of shape [n_mels, time_frames]
         """
         if waveform.dim() == 1:
             waveform = waveform.unsqueeze(0)  # Add channel dim
@@ -160,6 +154,34 @@ class VoxCelebGenderDataset(Dataset):
     
     def get_label_encoder(self):
         return self.label_encoder
+
+class VoxCelebSpeakerDataset(VoxCelebGenderDataset):
+    """
+    VoxCeleb1 dataset per il riconoscimento dell'ID dello speaker.
+    """
+    def __init__(
+        self,
+        root: str,
+        meta_file: str,
+        transform: Optional[Callable] = None,
+    ):
+        super().__init__(root, meta_file, transform)
+        self.speaker_label_encoder = LabelEncoder()
+        
+        # Estrai tutti gli speaker ID univoci per l'encoder
+        all_speaker_ids = [d[2] for d in self.data]
+        self.speaker_label_encoder.fit(all_speaker_ids)
+        
+        print(f"Numero totale di speaker univoci: {len(self.speaker_label_encoder.classes_)}")
+
+    def __getitem__(self, idx: int):
+        base_result = super().__getitem__(idx)
+        speaker_label = self.speaker_label_encoder.transform([base_result['speaker_id']])[0]
+        base_result['label'] = torch.tensor(speaker_label, dtype=torch.long)
+        return base_result
+    
+    def get_speaker_label_encoder(self):
+        return self.speaker_label_encoder
 
 class ESCAudioDataset(Dataset):
     """
