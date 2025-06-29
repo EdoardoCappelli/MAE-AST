@@ -59,7 +59,7 @@ class Config:
             pretraining_checkpoints_dir = './checkpoints/pretraining_schedPoly_lr0.0001_warmup',
 
             # Finetuning
-            n_classes_voxceleb = 1251,
+            n_classes_voxceleb = 2, # 1251for speaker identificiation, 2 for gender classification
             n_classes_esc = 50,
             pretrained_checkpoint_path = './checkpoints/pretraining_schedPoly_lr0.0001_warmup/librispeech&audioset/checkpoint_epoch_16.pth',
             voxceleb_meta_file = "./data/VoxCeleb/vox1_meta.csv",  
